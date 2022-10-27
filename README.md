@@ -18,6 +18,8 @@ If there is related infringement or violation of related regulations, please con
   - [1.5.1 基本信息剖析](#1.5.1)
   - [1.5.2 性能剖析](#1.5.2)
   - [1.5.3 壽命（Endurance）剖析](#1.5.3)
+  - [1.5.4 數據可靠性剖析](#1.5.4)
+  - [1.5.5 功耗剖析](#1.5.5)
 
 
 <h1 id="1">一、SSD總述</h1>
@@ -221,6 +223,91 @@ TBW和DWPD的計算公式：
 $$
 DWPD=\frac{TBW}{Years(SSD盤標示使用年限)*365*Capacity(單盤容量)}
 $$
+
+<h2 id="1.5.4">1.5.4 數據可靠性剖析</h2>
+
+衡量SSD可靠性的關鍵指標
+
+- UBER：Uncorrectable Bit Error Rate，不可修復的錯誤比特率
+  - UBER是一種數據損壞率衡量標準，等於在應用了任意特定的錯誤糾正機制後依然產生的每比特讀取的數據錯誤數量佔總讀取數量的比例（概率）
+- RBER：Raw Bit Error Rate，原始錯誤比特率
+  - RBER反映的是閃存的質量。所有閃存出廠時都有一個RBER指標。 RBER指標也不是固定不變的，閃存的數據錯誤率會隨著使用壽命（PE Cycle）的增加而增加
+
+    ![img13](./image/img13.PNG)
+
+  - RBER還跟閃存內部結構也有關係，Upper Page的RBER比Lower Page的RBER要高兩個數量級。
+
+    ![img14](./image/img14.PNG)
+
+- MTBF：Mean Time Between Failure，平均故障間隔時間
+  - MTBF指標反映的是產品的無故障連續運行時間
+
+
+閃存有天然的數據比特翻轉率
+
+- 擦寫磨損（P/E Cycle）
+- 讀取乾擾（Read Disturb）
+- 編程干擾（Program Disturb）
+- 數據保持（Data Retention）發生錯誤
+
+<h2 id="1.5.5">1.5.5 功耗剖析</h2>
+
+SSD的功耗類型：
+
+- 空閒（Idle）功耗：
+  - 當主機無任何命令發給SSD，SSD處於空閒狀態但也沒有進入省電模式時，設備所消耗的功耗。
+- Max active功耗：
+  - 最大功耗是SSD處於最大工作負載下所消耗的功耗，SSD的最大工作負載條件一般是連續寫
+- Standby/Sleep功耗：
+  - 在Standby和Sleep狀態下，設備應盡可能把不工作的硬件模塊關閉，降低功耗。一般消費級SSD Standby和Sleep功耗為100～500mW。
+- DevSleep功耗：
+  - SATA和PCIe新定義的一種功耗標準，目的是在Standby和Sleep基礎上再降一級功耗
+  - 配合主機和操作系統完成系統在休眠狀態下（如Hibernate），SSD關掉一切自身模塊，處於極致低功耗模式，甚至是零功耗。一般是10mW以下。
+
+對於主機而言，它的功耗狀態和SSD作為設備端是一一對應的，而功耗模式發起端是主機，SSD被動執行和切換對應功耗狀態。
+
+系統Power State（SATA SSD作為OS盤）：
+
+- S0：工作模式
+- S1：是低喚醒延遲的狀態, 硬件負責維持所有的系統上下文。
+- S2：與S1相似，從處理器的reset vector開始執行。
+- S3：睡眠模式（Sleep），CPU不運行指令，SATA SSD關閉，
+除了內存之外的所有上下文都會丟失。
+- S4：休眠模式（Hibernation），CPU不運行指令，SATA SSD
+關閉，DDR內容寫入SSD中，所有的系統上下文都會丟失，OS負責上
+下文的保存與恢復。
+- S5：Soft off state，與S4相似，但OS不會保存和恢復系統上下
+文。消耗很少的電能，可通過鼠標鍵盤等設備喚醒。
+
+SSD功耗最大的是ASIC主控和閃存模塊
+
+- 特定應用積體電路（英語：Application Specific Integrated Circuit，縮寫：ASIC）
+- 控制SSD溫度是固件設計要考慮的，就是設計降溫處理算法
+
+    ![img15](./image/img15.PNG)
+
+<h2 id="1.5.6">1.5.6 SSD系統兼容性</h2>
+
+BIOS和操作系統的兼容性
+
+- SSD上電加載後，主機中的BIOS作為第一層軟件和SSD進行交互。第一步，和SSD發生鏈接，SATA和PCIe走不同的底層鏈路鏈接
+
+- 主機端和SSD連接成功後發出識別盤的命令（如SATA Identify）來讀取盤的基本信息，基本信息包括產品part number、FW版本號、產品版本號等，BIOS會驗證信息的格式和數據的正確性，
+
+- 接著BIOS會讀取盤其他信息，如SMART，直到BIOS找到硬盤上的主引導記錄MBR，加載MBR
+  - S.M.A.R.T指的是自我監控分析與報告技術，也是一種內建於硬碟和 SSD 中的監控功能
+  - 主開機紀錄（Master Boot Record，縮寫：MBR），又叫做主引導磁區，是電腦開機後存取硬碟時所必須要讀取的首個磁區
+
+- MBR開始讀取硬盤分區表DPT，找到活動分區中的分區引導記錄PBR(Partition Boot Record)，並且把控制權交給PBR……最後，SSD通過數據讀寫功能來完成最後的OS加載
+
+啟動順序： BIOS -> MBR -> DPT -> PBR
+
+從測試角度來看，系統兼容性認證包括以下各個方面：
+
+- OS種類（Windows、Linux）和各種版本的OS；
+- 主板上CPU南北橋芯片組型號（Intel、AMD）和各個版本；
+- BIOS的各個版本；
+- 特殊應用程序類型和各個版本（性能BenchMark工具、Oracle數據庫……）
 
 
 
