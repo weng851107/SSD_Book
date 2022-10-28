@@ -20,6 +20,10 @@ If there is related infringement or violation of related regulations, please con
   - [1.5.3 壽命（Endurance）剖析](#1.5.3)
   - [1.5.4 數據可靠性剖析](#1.5.4)
   - [1.5.5 功耗剖析](#1.5.5)
+  - [1.6 接口型態](#1.6)
+  - [1.7.2 SSD、HDD應用場合](#1.7.2)
+- [二、SSD主控和全閃存陣列](#2)
+  - [2.1 SSD系統架構](#2.1)
 
 
 <h1 id="1">一、SSD總述</h1>
@@ -308,6 +312,110 @@ BIOS和操作系統的兼容性
 - 主板上CPU南北橋芯片組型號（Intel、AMD）和各個版本；
 - BIOS的各個版本；
 - 特殊應用程序類型和各個版本（性能BenchMark工具、Oracle數據庫……）
+
+電信號兼容性和硬件兼容性
+
+- SSD工作時，主機提供的電信號處於非穩定狀態，比如存在抖動、信號完整性差等情況，但依然在規範誤差範圍內，此時SSD通過自身的硬件設計（比如power regulator）和接口信號完整性設計依然能正常工作，數據也依然能正確收發
+
+容錯處理
+
+- SSD盤若能容錯並返回錯誤狀態給主機，提供足夠的日誌來幫助主機軟硬件開發人員調試就更好了。這裡的錯誤包括接口總線上的數據CRC錯誤、丟包、數據命令格式錯誤、命令參數錯誤等。
+
+<h2 id="1.6">1.6 接口型態</h2>
+
+SSD接口形態和尺寸的英文是SSD Form Factor
+
+![img16](./image/img16.PNG)
+
+mSATA是前些年出現的，與標準SATA相比體積大為縮小，主要應用於消費級筆記本領域。但待M.2出現後，基本上替代了mSATA，革了它的命。
+
+M.2原名是NGFF（Next Generation Form Factor），它是為超極本（Ultrabook）量身定做的新一代接口標準，主要用來取代mSATA接口，具備體積小巧、性能主流等特點。
+
+![img17](./image/img17.PNG)
+
+U.2Form Factor（SFF-8639）起步於PCIe SSD 2.5寸盤形態制定的接口，到後來統一了SATA、SAS和PCIe三種物理接口，從而減小了下游SSD應用場合的接口復雜度，是一種新型連接器FormFactor，目前標準還在更新中。
+
+BGA SSD
+
+- 隨著製程和封裝技術的成熟，當今一個PCB 2.5寸大小的存儲器可以放到一個16mm×20mm BGA封裝中，這就是BGA uSSD
+
+    ![img18](./image/img18.PNG)
+
+- 目前（2017年）世界上最小尺寸的SSD，其與手機中的eMMC及UFS的尺寸一樣大小，但是容量要大得多
+
+    ![img19](./image/img19.PNG)
+
+![img20](./image/img20.PNG)
+
+SDP(SATA Disk in Package)
+
+- 指將SSD主控芯片、閃存芯片在封裝廠封裝成一體化模塊，經過開卡量產、測試後出廠。這種產品形態相當於SSD的半成品，只需要加上外殼就能成為完整的SSD產品
+
+    ![img21](./image/img21.PNG)
+
+與傳統$PCBA$模式相比，$SDP^{TM}$具備哪些優勢？
+
+![img22](./image/img22.PNG)
+
+U.2
+
+- U.2俗稱SFF-8639，這是新生產物，採用非AIC(Add-In Card)形式，以盤的形態存在。開發U.2的目的是統一SAS、SATA、PCIe三種接口，方便用戶部署。
+
+<h2 id="1.7.2">1.7.2 SSD、HDD應用場合</h2>
+
+數據按照熱度的不同會採取不同的存儲方式，這樣可以平衡性能和成本的問題，俗稱性價比。在HDD和SSD二分天下的今天，SSD主要用於存放和用戶貼近的熱數據，其對總容量需求較小，性能優先；HDD主要用於存放和用戶較遠的溫（warm）數據或冷（cold）數據，其對總容量需求較大，價格優先
+
+- 數據加速層：採用PCIe接口的高性能的SSD。
+- 熱數據（頻繁訪問）層：採用普通SATA、SAS SSD。
+- 溫數據層：採用高性能HDD。
+- 冷數據層：採用HDD。
+- 歸檔層：採用大容量價格低廉的HDD，甚至磁帶
+
+SSD的研發模式，三方配合：主控廠商 + 閃存廠商 + 生產製造
+
+<h1 id="2">二、SSD主控和全閃存陣列</h1>
+
+SSD主要由兩大模塊構成——主控和閃存介質。
+除了上述兩大模塊外，可選的還有緩存單元
+
+主控是SSD的大腦，承擔著指揮、運算和協調的作用
+
+- 實現標準主機接口與主機通信；
+- 實現與閃存的通信；
+- 運行SSD內部FTL算法。
+
+<h2 id="2.1">2.1 SSD系統架構</h2>
+
+SSD作為數據存儲設備，其實是一種典型的（System on Chip）單機系統，有主控CPU、RAM、操作加速器、總線、數據編碼譯碼等模塊，操作對象為協議、數據命令、介質，操作目的是寫入和讀取用戶數據。
+
+![img23](./image/img23.PNG)
+
+- 前端（Host Interface Controller，主機接口控制器）跟主機打交道，接口可以是SATA、PCIe、SAS等
+
+    ![img24](./image/img24.PNG)
+
+  - SATA的全稱是Serial Advanced Technology Attachment（串行高級技術附件），是一種基於行業標準的串行硬件驅動器接口，是由Intel、IBM、Dell、APT、Maxtor和Seagate公司共同提出的硬盤接口規
+
+    ![img25](./image/img25.PNG)
+
+  - SAS（Serial Attached SCSI）即串行連接SCSI，是新一代的SCSI技術，和現在流行的Serial ATA（SATA）硬盤相同，都是採用串行技術以獲得更高的傳輸速度，並通過縮短連接線改善內部空間等
+
+  - SAS是並行SCSI接口之後開發出的全新接口，此接口的設計是為了改善存儲系統的效能、可用性和擴充性，並且提供與SATA硬盤的兼容性。SAS的接口技術可以向下兼容SATA
+
+    ![img26](./image/img26.PNG)
+
+  - PCIe（Peripheral Component Interconnect Express）是一種高速串行計算機擴展總線標準，旨在替代舊的PCI、PCI-X和AGP總線標準。
+
+  - PCIe屬於高速串行點對點多通道高帶寬傳輸，所連接的設備分配獨享通道帶寬，不共享總線帶寬，主要支持主動電源管理、錯誤報告、端對端的可靠性傳輸、熱插拔以及服務質量（QoS，Quality of Service）等功能。
+
+- 後端（Flash Controller，閃存控制器）跟閃存打交
+道並完成數據編解碼和ECC
+- 緩衝（Buffer）、DRAM
+- 模塊之間通過AXI高速和APB低速總線互聯互通，完成信息和數據的通信
+- 固件（Firmware）統一完成SSD產品所需要的功能，調度各個硬件模塊，完成數據從主機端到閃存端的寫入和讀取
+
+
+
 
 
 
