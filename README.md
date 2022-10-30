@@ -11,6 +11,16 @@ If there is related infringement or violation of related regulations, please con
 
     ![深入浅出ssd.jpg](./深入浅出ssd.jpg)
 
+- [Pre-Knowledge](#0)
+  - [Diode 二極體(管)](#0.1)
+  - [Transistor 三極體（電晶體）](#0.2)
+    - [功能](#0.2.1)
+    - [原理](#0.2.2)
+    - [特性](#0.3.3)
+  - [MOSFET](#0.3)
+    - [功能](#0.3.1)
+    - [原理](#0.3.2)
+    - [特性](#0.3.3)
 - [一、SSD總述](#1)
   - [1.1 引言](#1.1)
   - [1.2 SSD vs. HDD](#1.2)
@@ -24,6 +34,247 @@ If there is related infringement or violation of related regulations, please con
   - [1.7.2 SSD、HDD應用場合](#1.7.2)
 - [二、SSD主控和全閃存陣列](#2)
   - [2.1 SSD系統架構](#2.1)
+- [三、SSD儲存介質：閃存](#3)
+  - [3.1 閃存物理結構](#3.1)
+  - [3.1.2 SLC、MLC和TLC](#3.1.2)
+  - [3.1.3 閃存晶片架構](#3.1.3)
+  - [3.1.4 讀、寫、擦原理](#3.1.4)
+
+
+
+
+<h1 id="0">Pre-Knowledge</h1>
+
+<h2 id="0.1">Diode 二極體(管)</h2>
+
+- P型半導體 + N型半導體 = 二極體
+
+    ![PN二極體_img00](./doc/Diode/PN二極體_img00.PNG)
+
+- 將其通電，即會產生電場，電場方向與受力方向相反
+
+    ![PN二極體_img01](./doc/Diode/PN二極體_img01.PNG)
+
+    ![PN二極體_img02](./doc/Diode/PN二極體_img02.PNG)
+
+  - 當P端接正極：自由電子能向左移動與電洞結合，在電源的作用下可以形成電流
+
+    ![PN二極體_img03](./doc/Diode/PN二極體_img03.PNG)
+
+  - 當N端接正極：自由電子因為電場，而受力向右無法和電洞結合，無法形成電流，而造成截止
+
+    ![PN二極體_img04](./doc/Diode/PN二極體_img04.PNG)
+
+- 二極體的單向導電性
+
+    ![PN二極體_img05](./doc/Diode/PN二極體_img05.PNG)
+
+<h2 id="0.2">Transistor 三極體(管)（電晶體(管)）</h2>
+
+<h3 id="0.2.1">功能：</h3>
+
+- 當基極(B)沒有電流時，三極管會是截止非導通的狀態
+
+    ![img00](./doc/Transistor/img00.PNG)
+
+- 當基區(B)有電流時，三極管會是導通的狀態
+
+    ![img01](./doc/Transistor/img01.PNG)
+
+<h3 id="0.2.2">原理：</h3>
+
+**N型半導體**
+
+- 將磷原子摻進硅原子中，此時多出來的那顆電子，只要些許的能量就可以成為自由電子
+
+    ![img02](./doc/Transistor/img02.PNG)
+
+- 因為自由電子帶負電，故取名為N型半導體
+
+    ![img03](./doc/Transistor/img03.PNG)
+
+**P型半導體**
+
+- 將硼原子摻進硅原子中，此時會缺少一個電子，即多一個電洞，帶正電，會吸引電子，故取名為P型半導體
+
+    ![img04](./doc/Transistor/img04.PNG)
+
+**電晶體**
+
+- 三極體可以理解為兩個二極體以P作為重疊進行相接
+
+    ![img05](./doc/Transistor/img05.PNG)
+
+- 三個部分分別為**發射區(E)**、**基區(B)**、**收集區(C)**，且與二極體相接不相同的地方為它各區的濃度不相同，已發射區(E)最高，且基區(B)最薄
+
+    ![img06](./doc/Transistor/img06.PNG)
+
+    ![img07](./doc/Transistor/img07.PNG)
+
+- 當三極體與電源，不論正接或反接，就是截止非導通的狀態
+
+    ![img08](./doc/Transistor/img08.PNG)
+
+    ![img09](./doc/Transistor/img09.PNG)
+
+- 為了使三極體能夠導通，故需要在BE極也加上一個電源
+
+    ![img10](./doc/Transistor/img10.PNG)
+
+    ![img11](./doc/Transistor/img11.PNG)
+
+- 接上電源的BE二極體會使電子由E極流向B極，但由於B區的電洞密度不大，故址會有些許的電流由B極流向E極，形成**基極電流**，而大部分的電子會吸引到了集電區(C)，形成**集電極電流**，也就是**輸出電流**
+
+    ![img12](./doc/Transistor/img12.PNG)
+
+    ![img13](./doc/Transistor/img13.PNG)
+
+    ![img14](./doc/Transistor/img14.PNG)
+
+<h3 id="0.3.3">特性：</h3>
+
+- 當基極電流越大，流入基區的電子越多，進而流入集電區的電子更多，因此會有更大的集電極電流，這就是三極體利用**小電流控制大電流**的原理
+
+    ![img15](./doc/Transistor/img15.PNG)
+
+    ![img16](./doc/Transistor/img16.PNG)
+
+- 基區(B)作的很薄，是因為讓發射區(E)的電子更容易地進入集電區(C)
+
+    ![img17](./doc/Transistor/img17.PNG)
+
+- 基區(B)的電動濃度很低，是為了使基極電流越小，也使電子更容易地進入集電區(C)
+
+    ![img18](./doc/Transistor/img18.PNG)
+
+<h2 id="0.3">MOSFET</h2>
+
+<h3 id="0.3.1">功能：</h3>
+
+![MOS_img00](./doc/MOSFET/MOS_img00.PNG)
+
+- 當柵極(G)沒有施加電壓時，漏極(D)至源極(S)會被截斷
+
+    ![MOS_img01](./doc/MOSFET/MOS_img01.PNG)
+
+- 當柵極(G)施加電壓時，電流由漏極(D)至源極(S)會導通
+
+    ![MOS_img02](./doc/MOSFET/MOS_img02.PNG)
+
+<h3 id="0.3.2">原理：</h3>
+
+**二極體：**
+
+- P型半導體 + N型半導體 = 二極體
+
+    ![PN二極體_img00](./doc/MOSFET/PN二極體_img00.PNG)
+
+- 將其通電，即會產生電場，電場方向與受力方向相反
+
+    ![PN二極體_img01](./doc/MOSFET/PN二極體_img01.PNG)
+
+    ![PN二極體_img02](./doc/MOSFET/PN二極體_img02.PNG)
+
+  - 當P端接正極：自由電子能向左移動與電洞結合，在電源的作用下可以形成電流
+
+    ![PN二極體_img03](./doc/MOSFET/PN二極體_img03.PNG)
+
+  - 當N端接正極：自由電子因為電場，而受力向右無法和電洞結合，無法形成電流，而造成截止
+
+    ![PN二極體_img04](./doc/MOSFET/PN二極體_img04.PNG)
+
+**電晶體：**
+
+- 金屬氧化物半導體場效電晶體(Metal-Oxide-Semiconductor Field-Effect Transistor，縮寫：MOSFET)：
+
+  - 以NPN相接，形成兩個二極體，且方向相反，在兩個N型半導體引出兩個電極，分別作為漏極(D)與源極(S)
+
+    ![MOS_img03](./doc/MOSFET/MOS_img03.PNG)
+
+  - 將其接上電後，MOSFET會是截止的(NP會是截止，PN會是導通)
+
+    ![MOS_img04](./doc/MOSFET/MOS_img04.PNG)
+
+  - 為了能使其導通，加上一層絕緣層以及金屬層，作為柵極(G)
+
+    ![MOS_img05](./doc/MOSFET/MOS_img05.PNG)
+
+    ![MOS_img06](./doc/MOSFET/MOS_img06.PNG)
+
+    ![MOS_img07](./doc/MOSFET/MOS_img07.PNG)
+
+  - 將柵極(G)與正極相連形成一個開關，當close的時候，柵極(G)會對內產生一個電場，隨著電場大小吸引電子與排斥電洞，
+
+    ![MOS_img08](./doc/MOSFET/MOS_img08.PNG)
+
+    ![MOS_img09](./doc/MOSFET/MOS_img09.PNG)
+
+  - 當電子數量到達一定程度時，可將兩個N型半導體之間視為一個N溝道(一個N型半導體)，此時因為外在電壓可以造成電子移動，形成電流導通
+
+    ![MOS_img10](./doc/MOSFET/MOS_img10.PNG)
+
+    ![MOS_img11](./doc/MOSFET/MOS_img11.PNG)
+
+    ![MOS_img12](./doc/MOSFET/MOS_img12.PNG)
+
+  - 當柵極(G)與正極為open的時候，是截止不導通的
+
+    ![MOS_img13](./doc/MOSFET/MOS_img13.PNG)
+
+<h3 id="0.3.3">特性：</h3>
+
+1. 柵極(G)與源極(S)之間的阻抗非常大且流入柵極(G)的電流極小，因為絕緣層的原因
+
+    ![MOS_img14](./doc/MOSFET/MOS_img14.PNG)
+
+2. 由於柵極(G)與源極(S)之間的阻抗非常大且流入柵極(G)的電流極小，使得柵極會有高壓的狀態，容易會有靜電擊穿的發生，造成絕緣層的效果失效，進一步使的N型半導體之間的電子會通過柵極(G)往正極跑至源級(S)形成電流由柵極(G)往源極(S)的導通
+
+    ![MOS_img15](./doc/MOSFET/MOS_img15.PNG)
+
+    ![MOS_img16](./doc/MOSFET/MOS_img16.PNG)
+
+    ![MOS_img17](./doc/MOSFET/MOS_img17.PNG)
+
+**Note：靜電擊穿**
+
+- 靜電(static electricity)，是一種處於靜止狀態的電荷
+
+- 由於電子行業的迅速發展，體積小、集成度高的器件得到大規模生產，從而導致導線間距越來越小，絕緣膜越來越薄，致使耐擊穿電壓也愈來愈低。
+
+- 電子行業中靜電障害可分為兩類：
+  - 由靜電引力引起的浮游塵埃的吸附
+  - 由靜電放電引起的介質擊穿
+
+- 介質擊穿分熱擊穿、化學擊穿和電擊穿三種形式：
+  - 熱擊穿
+    - 介質工作時，當損耗產生的熱量大於介質向周圍散發的熱量時，介質的溫度迅速升高，導電隨之增加，直至介質的熱損壞。
+    - 可見熱擊穿的核心問題是散熱問題。
+  - 化學擊穿
+    - 在高壓下，強電場會在介質表面或內部的缺陷小孔附近產生局部空氣碰撞電離，引起介質電輝，生成化學物質--臭氧和二氧化碳，使絕緣性能降低，致使介質損壞。
+  - 電擊穿
+    - 在強電場中，隨著電場強的增強，電荷不斷積累，當達到一定程度時，電介質會失去極化特徵而成為導體，最後產生介質的熱損壞現象，這種現象稱為電介質的擊穿。
+    - 可見電擊穿的本質是電荷積聚所致，因而防止電荷積聚就可防止電擊穿。
+    - 一般把擊穿的臨界電壓稱為擊穿電壓, 臨界場強稱為擊穿場強。
+
+**Note：靜電**
+
+- 無論是什麼物體，都會帶有正、負兩種電。
+
+- 正電與負電數量相同，可說是已取得平衡的良好狀態。專業術語稱此為「電中性的狀態」。
+
+    ![ST_img00](./doc/MOSFET/ST_img00.PNG)
+
+- 取得平衡的良好狀態並無法永遠維持，一旦發生某個現象，平衡就會輕易被破壞。而這個現象就是當不同的兩個物體相互「碰撞」，其中一方的負電將會轉移到另一方。
+
+- 因「物體」不同，其吸引負電的力道不同所產生的相對關係。當兩個物體相互碰撞時，負電將會移動到吸引負電力道較強的一方。
+
+    ![ST_img01](./doc/MOSFET/ST_img01.PNG)
+
+- 此失去平衡的狀態就稱作「靜電」。帶有靜電的狀態，以專業的說法就是「有帶電」。靜電有帶正電的「正靜電」與帶負電的「負靜電」。
+
+- 負電返回正電端的現象稱為「放電」。換句話說，放電就是「釋放負電」，這時候在「物體」與「物體」之間會有電流流動。
+
+    ![ST_img02](./doc/MOSFET/ST_img02.PNG)
 
 
 <h1 id="1">一、SSD總述</h1>
@@ -390,32 +641,156 @@ SSD作為數據存儲設備，其實是一種典型的（System on Chip）單機
 
 ![img23](./image/img23.PNG)
 
-- 前端（Host Interface Controller，主機接口控制器）跟主機打交道，接口可以是SATA、PCIe、SAS等
+前端（Host Interface Controller，主機接口控制器）跟主機打交道，接口可以是SATA、PCIe、SAS等
 
-    ![img24](./image/img24.PNG)
+![img24](./image/img24.PNG)
 
-  - SATA的全稱是Serial Advanced Technology Attachment（串行高級技術附件），是一種基於行業標準的串行硬件驅動器接口，是由Intel、IBM、Dell、APT、Maxtor和Seagate公司共同提出的硬盤接口規
+- SATA的全稱是Serial Advanced Technology Attachment（串行高級技術附件），是一種基於行業標準的串行硬件驅動器接口，是由Intel、IBM、Dell、APT、Maxtor和Seagate公司共同提出的硬盤接口規
 
     ![img25](./image/img25.PNG)
 
-  - SAS（Serial Attached SCSI）即串行連接SCSI，是新一代的SCSI技術，和現在流行的Serial ATA（SATA）硬盤相同，都是採用串行技術以獲得更高的傳輸速度，並通過縮短連接線改善內部空間等
+- SAS（Serial Attached SCSI）即串行連接SCSI，是新一代的SCSI技術，和現在流行的Serial ATA（SATA）硬盤相同，都是採用串行技術以獲得更高的傳輸速度，並通過縮短連接線改善內部空間等
 
-  - SAS是並行SCSI接口之後開發出的全新接口，此接口的設計是為了改善存儲系統的效能、可用性和擴充性，並且提供與SATA硬盤的兼容性。SAS的接口技術可以向下兼容SATA
+- SAS是並行SCSI接口之後開發出的全新接口，此接口的設計是為了改善存儲系統的效能、可用性和擴充性，並且提供與SATA硬盤的兼容性。SAS的接口技術可以向下兼容SATA
 
     ![img26](./image/img26.PNG)
 
-  - PCIe（Peripheral Component Interconnect Express）是一種高速串行計算機擴展總線標準，旨在替代舊的PCI、PCI-X和AGP總線標準。
+- PCIe（Peripheral Component Interconnect Express）是一種高速串行計算機擴展總線標準，旨在替代舊的PCI、PCI-X和AGP總線標準。
 
-  - PCIe屬於高速串行點對點多通道高帶寬傳輸，所連接的設備分配獨享通道帶寬，不共享總線帶寬，主要支持主動電源管理、錯誤報告、端對端的可靠性傳輸、熱插拔以及服務質量（QoS，Quality of Service）等功能。
+- PCIe屬於高速串行點對點多通道高帶寬傳輸，所連接的設備分配獨享通道帶寬，不共享總線帶寬，主要支持主動電源管理、錯誤報告、端對端的可靠性傳輸、熱插拔以及服務質量（QoS，Quality of Service）等功能。
 
-- 後端（Flash Controller，閃存控制器）跟閃存打交
-道並完成數據編解碼和ECC
+- 數據傳輸速率高，目前最高的4.0版本可達到2GB/s（單向單通道速率）
+
+- PCI Express也有多種規格，從PCI Express 1X到PCI Express 32X，意思就是1個通道到32個通道
+
+    ![img27](./image/img27.PNG)
+
+    ![img28](./image/img28.PNG)
+
+主控CPU
+
+- SSD控制器SoC模塊和其他嵌入式系統SoC模塊並沒有什麼本質的不同，一般由一顆或多顆CPU核組成，同時片上有I-RAM、DRAM、PLL、IO、UART、高低速總線等外圍電路模塊
+- CPU負責運算、系統調度，IO完成必要的輸入輸出，總線連接前後端模塊。
+- 的固件就運行在CPU核上，分別有代碼存儲區I-RAM和數據存儲區D-RAM
+- 對稱多處理（SMP）多核共享OS和同一份執行代碼，共享一份I-RAM和D-RAM; 非對稱多處理（AMP)是多核分別執行不同代碼每核對應一份IRAM和D-RAM，每核獨立運行，沒有內存搶占導致代碼速度執行變慢的問題。
+- SSD的CPU外圍模塊包括UART、GPIO、JTAG，這些都是程序必不可少的調試端口，另外還有定時器模塊Timer及其他內部模塊，比如DMA、溫度傳感器、Power regulator模塊等。
+
+> Note: 
+> JTAG是聯合測試工作群組（Joint Test Action Group）的簡稱，是在名為標準測試存取埠和邊界掃描結構的IEEE的標準1149.1的常用名稱。此標準用於驗證設計與測試生產出的印刷電路板功能。
+> 在設計印刷電路板時，目前最主要用在測試積體電路的副區塊，而且也提供一個在嵌入式系統很有用的偵錯機制，提供一個在系統中方便的"後門"。當使用一些偵錯工具像電路內模擬器用JTAG當做訊號傳輸的機制，使得程式設計師可以經由JTAG去讀取整合在CPU上的偵錯模組。偵錯模組可以讓程式設計師偵錯嵌入式系統中的軟體。
+
+後端（Flash Controller，閃存控制器）跟閃存打交道並完成數據編解碼和ECC
+
+- ECC模塊是數據編解碼單元，由於閃存存儲天生存在誤碼率，為了數據的正確性，在數據寫入操作時應給原數據加入ECC校驗保護，這是一個編碼過程。
+- 讀取數據時，同樣需要通過解碼來檢錯和糾錯，如果錯誤的比特數超過ECC糾錯能力，數據會以“不可糾錯”的形式上傳給主機
+- 閃存控制器使用符合閃存ONFI(Open NAND Flash Interface)、Toggle標準的閃存命令，負責管理數據從緩存到閃存的讀取和寫入。
+- 一個Die/LUN是一個閃存命令執行的基本單元
+- Die/LUN是閃存通信的最小基本管理單元，配有下述的一套總線
+- 從閃存控制器角度看，為了性能需求需要並發多個閃存Die/LUN，通常配置有多個通道（channel）。一個通道掛多少個閃存Die/LUN，取決於SSD容量和性能需求，Die/LUN個數越多，並發的個數越多，性能越好。
+- 果一個通道上掛了多個閃存Die/LUN，每個Die共用每個通道上的一套總線，那閃存控制器通過選通信號CE#識別和哪個Die通信
+
+閃存控制器和閃存連接引腳按照如下操作
+
+![img29](./image/img29.PNG)
+
+- 外部接口：8個IO接口，5個使能信號（ALE、CLE、WE#、RE#、CE#），1個狀態引腳（R/B#），1個寫保護引腳（WP#）；
+- 命令、地址、數據都通過8個IO接口輸入輸出；
+- 寫入命令、地址、數據時，都需要將WE#、CE#信號同時拉低，數據在WE#上升沿被鎖存；
+- CLE、ALE用來區分IO引腳上傳輸的是數據還是地址。
+
+
 - 緩衝（Buffer）、DRAM
 - 模塊之間通過AXI高速和APB低速總線互聯互通，完成信息和數據的通信
 - 固件（Firmware）統一完成SSD產品所需要的功能，調度各個硬件模塊，完成數據從主機端到閃存端的寫入和讀取
 
+<h1 id="3">三、SSD儲存介質：閃存</h1>
 
+<h2 id="3.1">3.1 閃存物理結構</h2>
 
+現在的固態硬盤一般都是使用閃存作為存儲介質，並且是NAND閃存
+
+固態硬盤的工作原理很多也都是基於閃存特性的，比如：
+- 閃存在寫之前必須先擦除，不能覆蓋寫，於是固態硬盤才需要垃圾回收（Garbage Collection，或者叫Recycle）
+- 閃存每個塊（Block）擦寫次數達到一定值後，這個塊要么變成壞塊，要么存儲在上面的數據不可靠，所以固態硬盤固件必須做磨損平衡，讓數據平均寫在所有塊上，而不是盯著幾個塊拼命寫（不然很快固態硬盤就報廢了）。
+
+閃存是一種非易失性存儲器，掉電了數據也不會丟失
+
+閃存基本存儲單元（Cell）是一種類NMOS的雙層浮柵（Floating Gate）MOS管
+
+![img30](./image/img30.PNG)
+
+- 在源極（Source）和漏極（Drain）之間電流單向傳導的半導體上形成存儲電子的浮柵，浮柵上下被絕緣層包圍，存儲在裡面的電子不會因為掉電而消失，所以閃存是非易失性存儲器。
+- 寫操作是在控制極加正電壓，使電子通過絕緣層進入浮柵極。
+- 擦除操作正好相反，是在襯底加正電壓，把電子從浮柵極中吸出來
+
+![img31](./image/img31.PNG)
+
+<h2 id="3.1.2">3.1.2 SLC、MLC和TLC</h2>
+
+SLC(SingleLevel Cell)：一個存儲單元存儲1bit數據的閃存
+MLC(Multiple Level Cell)：存儲2bit數據的閃存
+TLC(Triple Level Cell)：存儲3bit數據的閃存
+
+![img32](./image/img32.PNG)
+
+閃存芯片裡面存儲單元的閾值電壓分佈函數，橫軸是閾值電壓，縱軸是存儲單元數量
+
+擦除之後，閃存讀出來的值為1，充過電之後，就是0。所以，如果需要寫1，就什麼都不用作；寫0，就需要充電到0。
+
+![img33](./image/img33.PNG)
+
+![img34](./image/img34.PNG)
+
+![img35](./image/img35.PNG)
+
+一個存儲單元電子劃分得越多，那麼在寫入的時候，控制進入浮柵極的電子個數就要越精細，所以寫耗費的時間就越長；同樣的，讀的時候，需要嘗試用不同的參考電壓去讀取，一定程度上加長了讀取時間
+
+![img36](./image/img36.PNG)
+
+<h2 id="3.1.3">3.1.3 閃存晶片架構</h2>
+
+閃存芯片就是由成千上萬這樣的存儲單元按照一定的組織結構組成的。
+
+![img37](./image/img37.PNG)
+
+一個Wordline對應著一個或若干個Page，具體是多少取決於是SLC、MLC或者TLC。
+
+- SLC：一個Wordline對應1個Page
+- MLC：一個Wordline對應2個Page，這兩個Page是一對（Lower Page和Upper Page）
+- TLC：一個Wordline對應3個Page（Lower Page、Upper Page和Extra Page
+
+一個Page有多大，那麼Wordline上面就有多少個存儲單元，就有多少個Bitline
+
+一個Block當中的所有這些存儲單元都是共用一個襯底
+
+一個閃存芯片有若干個DIE（或者叫LUN）
+每個DIE有若干個Plane
+每個Plane有若干個Block
+每個Block有若干個Page
+每個Page對應著一個或若干個Wordline
+Wordline由成千上萬個存儲單元構成。
+
+![img38](./image/img38.PNG)
+
+DIE/LUN是接收和執行閃存命令的基本單元。 
+- LUN0和LUN1可以同時接收和執行不同的命令
+- 但在一個LUN當中，一次只能獨立執行一個命令，你不能對其中某個Page寫的同時，又對其他Page進行讀訪問
+
+一個LUN又分為若干個Plane，市面上常見的是1個或者2個Plane，現在也有4個Plane的閃存了。
+- 每個Plane都有自己獨立的Cache Register和Page Register，其大小等於一個Page的大小。
+- 主控在寫某個Page的時候，先把數據從主控傳輸到該Page所對應Plane的Cache Register當中，然後再把整個Cache Register當中的數據寫到閃存陣列
+- 讀的時候則相反，先把這個Page的數據從閃存介質讀取到Cache Register，然後再按需傳給主控。
+- Cache讀支持在傳輸前一個Page數據給主控的時候（Cache Register→主控），可以從閃存介質讀取下一個主控需要讀的Page的數據到Page Register（閃存介質→Page Register），這樣數據在閃存總線傳輸的時間就可以隱藏在讀閃存介質的時間裡
+- Cache寫支持閃存寫前一個Page數據的同時（Page Register→閃存介質），傳輸下一個要寫的數據到Cache Register（主控→Cache Register），這樣數據在閃存總線傳輸可以隱藏在前一個Page的寫時間裡。
+
+閃存寫入時間是指一個Page的數據從Page Register當中寫入閃存介質的時間，閃存讀取時間是指一個Page的數據從閃存介質讀取到Page Register的時間。
+
+閃存一般都支持Multi-Plane（或者Dual-Plane）操作。
+- 使用Dual-Plane操作，兩個不同Plane上的Page數據會在一個閃存讀取(寫入)時間加載到各自的Cache Register當中，這樣用一個讀取(寫入)時間讀取(寫入)到兩個Page的數據，讀取速度加快
+
+一個Block當中的所有存儲單元是共用一個襯底（Substrate），當你對某襯底施加強電壓，那麼上面所有浮柵極的電子都會被吸出來。 ，所以閃存的擦除是以Block為單位的
+
+<h2 id="3.1.4">3.1.4 讀、寫、擦原理</h2>
 
 
 
