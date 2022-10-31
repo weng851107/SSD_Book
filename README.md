@@ -44,6 +44,9 @@ If there is related infringement or violation of related regulations, please con
   - [3.2.1 異步時序](#3.2.1)
   - [3.2.2 同步時序](#3.2.2)
   - [3.2.3 閃存命令集](#3.2.3)
+  - [3.2.4 閃存尋址](#3.2.4)
+  - [3.2.5 讀、寫、擦時序](#3.2.5)
+  - [3.2.6 ONFI與Toggle協議之爭](#3.2.6)
 
 
 
@@ -931,8 +934,52 @@ CT技術現在主要是應用在3D閃存上
 
 <h2 id="3.2.3">3.2.3 閃存命令集</h2>
 
+每款閃存芯片都定義了其支持的命令，以ONFI 2.3協議為例，它定義的命令如下表所示
 
+![img56](./image/img56.PNG)
 
+<h2 id="3.2.4">3.2.4 閃存尋址</h2>
+
+圖3-36所示是一個Target，就是我之前說的一個可以獨立工作的邏輯芯片。它包含2個LUN，每個LUN有2個Plane，每個Plane有很多Block，每個Block又有很多Page。
+
+![img57](./image/img57.PNG)
+
+為了訪問這些資源，閃存裡面使用了列地址（Row Address）和行地址（Column Address）
+
+- Column Address：Page內部的偏移地址
+- Row Address：如圖3-37所示，從高位到低位依次為LUN、Block和Page地址，至於具體位寬，則和每個芯片的容量有關。
+
+![img58](./image/img58.PNG)
+
+Plane是在Block地址的最低位
+
+![img59](./image/img59.PNG)
+
+<h2 id="3.2.5">3.2.5 讀、寫、擦時序</h2>
+
+讀時序如圖3-39所示：
+
+- 在用戶發送命令00～30h之間傳輸了所讀的地址，包括2個列地址和3個行地址
+- 發完命令後，SR[6]（Status Register，狀態寄存器，bit 6）狀態轉為Busy
+- 經過一段時間之後 SR[6]狀態轉為Ready，數據就可以讀了。
+
+![img60](./image/img60.PNG)
+
+寫時序如圖3-40所示：
+
+- 用戶發了80h命令之後，發送寫地址，一般列地址是0，因為要把一個Page寫滿，如果不從頭開始寫滿一個Page，往往會導致數據出錯。
+- 發完地址tADL時間之後，開始傳輸數據到閃存的緩存。
+- 數據傳完，發送命令10h，閃存芯片開始向介質寫入數據，SR[6]狀態為Busy，在寫操作完成後狀態轉為Ready。
+
+![img61](./image/img61.PNG)
+
+擦除如圖3-41所示：
+
+- 在命令60h和D0h之間發送LUN和Block行地址即可（因為擦除是以Block為單位）
+
+![img62](./image/img62.PNG)
+
+<h2 id="3.2.6">3.2.6 ONFI與Toggle協議之爭</h2>
 
 
 
