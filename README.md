@@ -1465,4 +1465,24 @@ $$
 
 ![img91](./image/img91.PNG)
 
+在沒有Trim之前，SSD無法知道那些被刪除的數據頁是否無效，必須等到系統要求在相同的地方（用戶空間、邏輯空間）寫入數據時才知道那些數據是無效的，進而放心刪除。
+
+由於SSD不知道這些刪除的數據已經無效，在做垃圾回收的時候，仍把它當作有效數據進行數據的搬移，這不僅影響到GC的性能，還影響到SSD的壽命（寫放大增大）
+
+Trim是一個新增的ATA(AT Attachment)命令（Data Set Management），專為SSD而生
+
+- SCSI裡面的同等命令叫UNMAP，
+- NVMe裡面叫Deallocate。
+
+當用戶刪除一個文件時，操作系統會發Trim命令給SSD，告訴SSD該文件對應的數據無效了
+
+一般FTL都有這3個表：
+
+- FTL映射表記錄每個LBA對應的物理頁位置
+- Valid Page Bit Map（VPBM）記錄每個物理塊上哪個頁有有效數據
+- Valid Page Count（VPC）則記錄每個物理塊上的有效頁個數
+
+![img92](./image/img92.PNG)
+
+
 
