@@ -69,6 +69,9 @@ If there is related infringement or violation of related regulations, please con
   - [4.4 Trim](#4.4)
   - [4.5 磨損平衡](#4.5)
   - [4.6 掉電恢復](#4.6)
+  - [4.7 壞塊管理](#4.7)
+  - [4.8 SLC cache](#4.8)
+  - [4.9 Read Disturb(RD) & Data Retention(DR)](#4.9)
 
 
 
@@ -1594,5 +1597,103 @@ SSD的異常掉電恢復主要就是映射表的恢復重建
 
 - 拿TOSHIBA某型號閃存來說，它是這樣標記出廠壞塊的，如圖4-47所示
 
-    ![img100](./image/img100.PNG)
+    ![img101](./image/img101.PNG)
+
+  - 在出廠壞塊的第一個閃存頁和最後一個閃存頁的數據區第一個字節和Spare區第一個字節寫上一個非0xFF的值。
+
+用戶在使用閃存的時候，首先應該按照閃存文檔，掃描所有的閃存塊，把壞塊剔除出來，建立一張壞塊表
+
+![img102](./image/img102.PNG)
+
+有些閃存廠商，它會把壞塊信息存儲在閃存內部某個地方（掉電不丟失），用戶在建立壞塊表的時候，沒有必要掃描所有的閃存塊來識別壞塊，只需讀取閃存的那個特定區域。
+
+- 如Micron，它的閃存內部有個叫OTP（One Time Programming）的區域，出廠壞塊信息可以存在裡面
+
+增長壞塊的出現會通過讀寫擦等操作反映出來。比如讀到UECC（Uncorrectable Error Correction Code，數據沒有辦法通過ECC糾錯恢復）、擦除失敗、寫失敗，這都是一個壞塊出現的症狀
+
+壞塊管理策略
+
+1. 略過（Skip）策略
+
+- 用戶根據建立的壞塊表，在寫閃存的時候，一旦遇到壞塊就跨過它，寫下一個Block。
+
+- Die 1上有個Block B是壞塊，則寫完Block A時，接下來便會跨過Block B寫到Die 2的Block C上面去。
+
+    ![img103](./image/img103.PNG)
+
+2. 替換（Replace）策略
+
+- 當某個Die上發現壞塊時，它會被該Die上的某個好塊替換
+
+- 用戶在寫數據的時候，不是跨過這個Die，而是寫到替換塊上面去
+
+- 除正常用戶使用的閃存塊，還需額外保留一部分好的閃存塊，用於替換用戶空間的壞塊。整個Die上閃存塊就劃分為兩個區域：用戶空間和預留空間，如圖4-50所示
+
+    ![img104](./image/img104.PNG)
+
+- SSD內部需維護一張重映射表（Remap Table）：壞塊到替換塊的映射，比如圖4-51的B→B'
+
+    ![img105](./image/img105.PNG)
+
+略過策略的劣勢在於性能不穩定。以4個Die為例，略過策略可能導致Die的並行度在1和4個Die之間，而替換策略並行度總是4個Die
+
+替換策略有木桶效應，如果某個Die質量比較差，則整個SSD可用的閃存塊則受限於那個壞的Die
+
+<h2 id="4.8">4.8 SLC cache</h2>
+
+SLC相對MLC和TLC來說，有更好的讀寫性能和更長的壽命（Endurance）
+
+![img106](./image/img106.PNG)
+
+有些SSD拿它來做Cache使用，讓SSD具有更好的突發性能（Burst Performance）
+
+SLC Cache，不是說單獨拿SLC閃存來做Cache，而是把MLC或者TLC裡面的一些閃存塊配置成SLC模式來訪問，而這個特性一般的MLC或者TLC都是支持的。
+
+1. 性能考慮
+2. 防止Lower Page數據被帶壞
+3. 解決閃存的缺陷
+4. 更多的數據寫入量
+
+消費級SSD和移動存儲產品（比如eMMC、UFS等）使用SLC Cache
+
+- 使用SLC Cache具有更好的突發性能
+- 一般都沒有電容保護，使用SLC Cache能保證Lower Page數據不丟失
+
+企業級SSD不使用使用SLC Cache
+
+- 它追求的是穩態速度，它不希望SSD一下子速度飆升（寫SLC），然後一下子速度急劇下降（寫TLC）
+- 一般都配有電容，能保證閃存的正常寫入，它不存在Lower Page數據被帶壞的問題，所以沒有必要採用SLC Cache這種手段來保護數據
+
+SLC Cache寫入策略：
+
+1. 強制SLC寫入：
+
+- 用戶寫入數據時，必須先寫入到SLC閃存塊，然後通過GC搬到MLC或者TLC閃存塊
+- 能保護Lower Page數據
+- 一方面要把SLC的數據搬到MLC或者TLC，以騰出SLC空間供新用戶數據的寫入，同時又要把用戶數據寫入到SLC，性能肯定比只寫MLC或者TLC慢
+
+2. 非強制SLC寫入：
+
+- 用戶寫入數據時，如果有SLC閃存塊，則寫入到SLC閃存塊，否則直接寫到MLC或者TLC閃存塊
+- 不能保護Lower Page數據
+- 有更好的後期寫入性能，因為在SLC閃存塊耗盡的情況下，用戶數據直接寫入到MLC或者TLC
+
+雖然GC（數據搬移）還是存在Lower Page數據被帶壞的可能，但如果我們在目標閃存塊沒有被寫滿前，不把源閃存塊擦除，這樣即使Lower Page數據被帶壞，它還是能通過讀源閃存塊恢復數據
+
+根據SLC閃存塊的來源：
+
+1. 靜態SLC Cache：拿出一些Block專門用做SLC Cache
+2. 動態SLC Cache：所有的MLC或者TLC都有可能挑來當SLC
+Cache，SLC和TLC不分家
+3. 兩者混合：即既有專門的SLC閃存塊，還能把其他通用閃存塊拿來當SLC Cache
+
+<h2 id="4.9">4.9 Read Disturb(RD) & Data Retention(DR)</h2>
+
+Read Disturb與Data Retention都能導致數據丟失，但原理與固件處理方式不一樣
+
+
+
+
+
+
 
