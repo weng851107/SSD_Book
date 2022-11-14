@@ -74,6 +74,10 @@ If there is related infringement or violation of related regulations, please con
   - [4.9 Read Disturb(RD) & Data Retention(DR)](#4.9)
   - [4.10 Host Based FTL & Device Based FTL](#4.10)
 - [五、PCIe介紹](#5)
+  - [5.1 PCIe的速度](#5.1)
+  - [5.2 PCIe拓撲結構](#5.2)
+  - [5.3 PCIe分層結構](#5.3)
+  - [5.4 PCIe TLP類型](#5.4)
 
 
 
@@ -1739,7 +1743,7 @@ Host Based SSD：
 
 <h1 id="5">五、PCIe介紹</h1>
 
-<h2 id="5.1">PCIe的速度</h2>
+<h2 id="5.1">5.1 PCIe的速度</h2>
 
 ![img109](./image/img109.PNG)
 
@@ -1760,5 +1764,78 @@ SATA是什麼工作模式如圖5-3所示
 
 - 和PCIe一樣，SATA也有獨立的發送和接收通道，但與PCIe工作模式不一樣，同一時間，只有一條通道可以進行數據傳輸，這種工作模式稱為半雙工模式
 - PCIe猶如我們的手機，雙方可以同時講話，而SATA就是對講機了，一個人在說話，另外一個人就只能聽不能說。
+- 和SATA單通道不同，PCIe連接可以通過增加通道數擴展帶寬，彈性十足。通道數越多，速度越快。不過，成本越高，佔用更多空間與更耗電
+- 現有的PCIe SSD一般最多使用4通道，如PCIe3.0x4，雙向帶寬為8GB/s，讀或者寫帶寬為4GB/s。
+
+PCIe是從PCI發展過來的，PCIe的“e”是express的簡稱，表示“快”
+
+- PCI使用並口傳輸數據，而PCIe使用的是串口傳輸
+- PCI並行總線，單個時鐘週期可以傳輸32bit或64bit，在實際時鐘頻率比較低的情況下，並口因為可以同時傳輸若干比特，速率確實比串口
+- 隨著技術的發展，要求數據傳輸速率越來越快，要求時鐘頻率也越來越快，但是，並行總線時鐘頻率不是想快就能快的
+- 採用並行傳輸，接收端必須等最慢的那個bit數據到了以後，才能鎖住整個數據
+- 如果使用多條Lane傳輸數據（串行中又有並行），這個問題又回來了，不過PCIe有將其處理好
+
+<h2 id="5.2">5.2 PCIe拓撲結構</h2>
+
+設備抽象為一個點，傳輸介質抽象為一條線
+
+PCI採用的是總線型拓撲結構
+
+- 一條PCI總線上掛著若干個PCI終端設備或者PCI橋設備，大家共享該條PCI總線，哪個人想說話，必須獲得總線使用權，然後才能發言
+
+    ![img112](./image/img112.PNG)
+
+PCIe則採用樹形拓撲結構
+
+![img113](./image/img113.PNG)
+
+- Root Complex（RC）是樹的根，它為CPU代言，與整個計算機系統其他部分通信，比如CPU通過它訪問內存，通過它訪問PCIe系統中的設備。
+- PCIe Endpoint，就是PCIe終端設備，比如PCIe SSD、PCIe網卡等，這些Endpoint可以直接連在RC上，也可以通過Switch連到PCIe總線上。
+- Switch用於擴展鏈路，提供更多的端口用以連接Endpoint
+
+Switch擴展了PCIe端口，並為掛在它上面的設備（Endpoint或者Switch）提供路由和轉發服務
+
+- 靠近RC的那個端口，我們稱為上游端口（Upstream Port）
+- 分出來的其他端口，我們稱為下游端口（Downstream Port）
+- 一個Switch只有一個上游端口，可以擴展出若干個下游端口
+- 下游端口可以直接連接Endpoint，也可以連接Switch，擴展出更多的PCIe端口
+- 每個Switch內部，也是有一根內部PCIe總線的，然後通過若干個Bridge，擴展出若干個下游端口
+
+    ![img114](./image/img114.PNG)
+
+雖然PCIe採用點到點通信，即理論上任何兩個Endpoint都可以直接通信，但實際中很少這樣做，因為兩個不同設備的數據格式不一樣，除非這兩個設備是同一個廠商的
+
+通常都是Endpoint與RC通信，或者Endpoint通過RC與另外一個Endpoint通信
+
+<h2 id="5.3">5.3 PCIe分層結構</h2>
+
+PCIe定義了下三層：事務層（Transaction Layer）、數據鏈路層（Data Link Layer）和物理層（Physical Layer，包括邏輯子模塊和電氣子模塊）
+
+![img115](./image/img115.PNG)
+
+PCIe傳輸的數據從上到下，都是以數據包（Packet）的形式傳輸的，每層數據包都是有其固定的格式。
+
+- 事務層的主要職責是創建（發送）或者解析（接收）TLP（Transaction Layer Packet）、流量控制、QoS、事務排序等。
+- 數據鏈路層的主要職責是創建（發送）或者解析（接收）DLLP（Data Link Layer Packet）、Ack/Nak協議（鏈路層檢錯和糾錯）、流控、電源管理等。
+- 物理層的主要職責是處理所有的Packet數據物理傳輸，發送端數據分發到各個Lane傳輸（Stripe），接收端把各個Lane上的數據匯總起來（De-stripe），每個Lane上加擾（Scramble，目的是讓0和1分佈均勻，去除信道的電磁干擾EMI）和去擾（De-scramble），以及8/10或者128/130編碼解碼等。
+
+![img116](./image/img116.PNG)
+
+發送方打包與接收方解包的TLP過程
+
+![img117](./image/img117.PNG)
+
+![img118](./image/img118.PNG)
+
+每個Endpoint都需要實現這三層，每個Switch的Port也需要實現這三層
+
+Switch的主要功能是轉發數據，為什麼還需要實現事務層？ Switch必須實現這三層，因為數據的目的地信息是在TLP中的，如果不實現這一層，就無法知道目的地址，也就無法實現數據尋址路由。
+
+![img119](./image/img119.PNG)
+
+<h2 id="5.4">5.4 PCIe TLP類型</h2>
+
+
+
 
 
