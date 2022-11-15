@@ -78,6 +78,8 @@ If there is related infringement or violation of related regulations, please con
   - [5.2 PCIe拓撲結構](#5.2)
   - [5.3 PCIe分層結構](#5.3)
   - [5.4 PCIe TLP類型](#5.4)
+  - [5.5 PCIe TLP結構](#5.5)
+  - [5.6 PCIe配置和地址空間](#5.6)
 
 
 
@@ -1835,7 +1837,127 @@ Switch的主要功能是轉發數據，為什麼還需要實現事務層？ Swit
 
 <h2 id="5.4">5.4 PCIe TLP類型</h2>
 
+主機與PCIe設備之間，或者PCIe設備與設備之間，數據傳輸都是以Packet形式進行的
+
+根據軟件層的不同請求，事務層產生四種不同的TLP請求：
+
+- Memory：訪問內存空間
+- IO：訪問IO空間
+- Configuration：配置空間
+- Message：
+  - 過去一些由邊帶信號線傳輸的數據，比如中斷信息、錯誤信息等，現在就交由Message來傳輸了。
+  - Message請求是PCIe新加的。在PCI或者PCI-X時代，像中斷、錯誤以及電源管理相關信息，都是通過邊帶信號（Sideband Signal）進行傳輸的
+  - PCIe幹掉了這些邊帶信號線，所有的通信都是走帶內信號，即通過Packet傳輸
+
+新的PCIe設備（區別於LegacyPCIe設備）只支持內存映射，之所以還存在訪問IO空間的TLP，完全是為了照顧那些老設備。以後IO映射的方式會逐漸取消，為減輕學習壓力，我們以後看到IO相關的東西，大可忽略掉
+
+如果需要對方響應(返回一個Completion TLP來作為響應)的，我們稱之為Non-Posted TLP
+
+- Configuration和IO訪問，無論讀寫，都是Non-Posted的，這樣的請求必須得到設備的響應
+- Memory Read
 
 
+如果不指望對方給響應(返回一個Completion TLP來作為響應)的，我們稱之為Posted TLP
+
+- Message TLP
+- Memory Write
+
+    ![img120](./image/img120.PNG)
+
+除了Endpoint之外，還有Switch這個PCIe設備，因此在Configuration中以Type0與Type1來區分
+
+![img121](./image/img121.PNG)
+
+對Read Request來說，響應者通過Completion TLP返回請求者所需的數據，這種CompletionTLP包含有效數據；
+
+對Write Request（現在只有ConfigurationWrite了）來說，響應者通過Completion TLP告訴請求者執行狀態，這樣的Completion TLP不含有效數據。
+
+PCIe裡面所有的TLP=Request TLP+Completion TLP
+
+![img122](./image/img122.PNG)
+
+![img123](./image/img123.PNG)
+
+![img124](./image/img124.PNG)
 
 
+一個TLP最多只能攜帶4KB有效數據
+
+- 如果PCIe設備C需要讀16KB的數據，則RC必須返回4個CplD給PCIe設備C
+- PCIe設備C只需發1個MRd就可以
+
+<h2 id="5.5">5.5 PCIe TLP結構</h2>
+
+TLP主要由三部分組成：Header、Data（可選，取決具體TLP類型）和ECRC（可選）
+
+TLP都是始於發送端的事務層（Transaction layer），終於接收端的事務層。
+
+![img125](./image/img125.PNG)
+
+- 事務層根據上層請求內容，生成TLP Header。 Header內容包括發送者的相關信息、目標地址（該TLP要發給誰）、TLP類型（諸如前面提到的Memory Read、Memory Write）、數據長度（如果有的話）等。
+- Data Payload域，用以放有效載荷數據。該域不是必需的，因為並不是每個TLP都必須攜帶數據
+- ECRC（End to End CRC）域，它對之前的Header和Data（如果有的話）生成一個CRC，在接收端根據收到的TLP重新生成Header和Data（如果有的話）的CRC，與收到的CRC比較，一樣則說明數據在傳輸過程中沒有出錯，否則就有錯。它也是可選的，可以設置不加CRC。
+
+一個Header大小可以是3DW，也可以是4DW。以4DW的Header為例
+
+![img126](./image/img126.PNG)
+
+- 深色區域為所有TLP Header公共部分，所有Header都有這些；其他則跟具體的TLP相關。
+- Fmt：Format，表明該TLP是否帶有數據，Header是3DW還是4DW。
+- Type：TLP類型，上一節提到的，包括Memory Read、Memory Write、Configuration Read、Configuration Write、Message和Completion等。
+- TC：Traffic Class，TLP也分三六九等，優先級高的先得到服務。 TC：3bit，說明可以分為8個等級，0～7，
+- Attr：Attrbiute，屬性
+- TH：TLP Processing Hints。
+ -TD：TLP Digest，之前說ECRC可選，如果這個bit置起來，說明該TLP包含ECRC，接收端應該做CRC校驗。
+- EP：Poisoned Data，“有毒”的數據，遠離。
+- AT：Address Type，地址種類。
+- Length：Payload數據長度，10個bit，最大為1024，單位為DW，所以TLP最大數據長度是4KB；該長度總是DW的整數倍，如果TLP的數據不是DW的整數倍（不是4Byte的整數倍），則需要用到Last DW BE和1st DW BE這兩個域。
+
+TLP格式和類型域編碼
+
+![img127](./image/img127.PNG)
+
+Memory TLP
+
+![img128](./image/img128.PNG)
+
+- TLP的源和目標。因為不同的TLP類型，尋址方式不同，因此要結合具體TLP來看。
+- 對一個PCIe設備來說，它開放給主機訪問的設備空間首先會映射到主機的內存空間，主機如果想訪問設備的某個空間，TLP Header當中的地址應該設置為該訪問空間在主機內存的映射地址。
+- 對4GB內存空間，32bit的地址用1DW就可以表示，該地址位於Byte8-11；而4GB以上的內存空間，需要用2DW表示地址，該地址位於Byte8-15。
+- Memory TLP的目標是通過內存地址告知的，而源則是通過“Requester ID”告知的。每個設備在PCIe系統中都有唯一的ID，該ID由總（Bus）、設備（Device）、功能（Function）三者唯一確定
+
+Configuration TLP
+
+![img129](./image/img129.PNG)
+
+- Endpoint和Switch的配置（Configuration）格式不一樣，分別由Type 0和Type 1來表示。
+- Number+Device+Function就唯一決定了目標設備
+- Ext Reg Number+Register Number相當於配置空間的偏移
+
+Message TLP
+
+- 取代PCI時代的邊帶信號傳輸，用於傳輸中斷、錯誤、電源管理等信息，
+
+Completion TLP
+
+- 有Non-Posted Request TLP，才有Completion TLP
+
+<h2 id="5.6">5.6 PCIe配置和地址空間</h2>
+
+配置空間：
+
+![img130](./image/img130.PNG)
+
+- 每個PCIe設備都有這樣一段空間，主機軟件可以通過讀取它獲得該設備的一些信息，也可以通過它來配置該設備
+- 整個配置空間就是一系列寄存器的集合，由兩部分組成：64B的Header和192B的Capability數據結構。
+- PCIe把整個配置空間由256B擴展成4KB，前面256B保持不變（見圖5-28）
+
+地址空間 BAR（Base Address Register）
+
+- Endpoint Configuration（Type 0）提供了最多6個BAR
+- Switch（Type 1）來說只有2個
+
+CPU只能直接訪問主機內存（Memory）空間（或者IO空間），不能對PCIe等外設進行直接操作，可以透過RC去辦。比如，
+
+- 如果CPU想讀PCIe外設的數據，先叫RC通過TLP把數據從PCIe外設讀到主機內存，然後CPU從主機內存讀數據；
+- 如果CPU要往外設寫數據，則先把數據在內存中準備好，然後叫RC通過TLP寫入到PCIe設備
