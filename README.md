@@ -80,6 +80,7 @@ If there is related infringement or violation of related regulations, please con
   - [5.4 PCIe TLP類型](#5.4)
   - [5.5 PCIe TLP結構](#5.5)
   - [5.6 PCIe配置和地址空間](#5.6)
+  - [5.7 TLP的路由](#5.7)
 
 
 
@@ -1946,16 +1947,18 @@ Completion TLP
 
 配置空間：
 
-![img130](./image/img130.PNG)
-
 - 每個PCIe設備都有這樣一段空間，主機軟件可以通過讀取它獲得該設備的一些信息，也可以通過它來配置該設備
 - 整個配置空間就是一系列寄存器的集合，由兩部分組成：64B的Header和192B的Capability數據結構。
 - PCIe把整個配置空間由256B擴展成4KB，前面256B保持不變（見圖5-28）
+
+    ![img130](./image/img130.PNG)
 
 地址空間 BAR（Base Address Register）
 
 - Endpoint Configuration（Type 0）提供了最多6個BAR
 - Switch（Type 1）來說只有2個
+
+![img131](./image/img131.PNG)
 
 CPU只能直接訪問主機內存（Memory）空間（或者IO空間），不能對PCIe等外設進行直接操作，可以透過RC去辦。比如，
 
@@ -1963,6 +1966,63 @@ CPU只能直接訪問主機內存（Memory）空間（或者IO空間），不能
 - 如果CPU要往外設寫數據，則先把數據在內存中準備好，然後叫RC通過TLP寫入到PCIe設備
 
 上電的時候，系統把PCIe設備開放的空間（系統軟件可見）映射到內存地址空間，CPU要訪問該PCIe設備空間，只需訪問對應的內存地址空間。 RC檢查該內存地址，如果發現該內存空間地址是某個PCIe設備空間的映射，就會觸發其產生TLP，去訪問對應的PCIe設備，讀取或者寫入PCIe設備。
+
+對於PCIe設備，系統軟件是如何為其分配映射空間的（見圖5-32）
+
+![img132](./image/img132.PNG)
+
+- 上電時，系統軟件首先會讀取PCIe設備的BAR0，得到數據
+- 然後系統軟件往該BAR0寫入全1
+- BAR寄存器有些bit是只讀的，是PCIe設備在出廠前就固定好的bit，寫全1進去，如果值保持不變，就說明這些bit是廠家固化好的，這些固化好的bit提供了這塊內部空間的一些信息：
+  - 低12位沒變，表明該設備空間大小是4KB（2的12次方字節）
+  - 低4位表明了該存儲空間的一些屬性（IO映射還是內存映射？32bit地址還是64bit地址？能否預取？
+- 系統軟件根據這些信息，在系統內存空間找到這樣一塊地方來映射這4KB的空間，把分配的基地址寫入到BAR0（見圖5-35）。
+
+    ![img133](./image/img133.PNG)
+
+- 系統軟件依次讀取BAR1、BAR2……直到BAR5，完成所有內部空間的映射。
+
+前面說每個PCIe設備都有一個配置空間，其實這樣的說法是不准確的，而是每個PCIe設備至少有一個配置空間。一個PCIe設備可能具有多個功能（Function），比如既能當硬盤，還能當網卡，每個功能對應一個配置空間。
+
+![img134](./image/img134.PNG)
+
+因此，在整個PCIe系統中，只要知道了Bus No. + DeviceNo. + Function No.，就能找到唯一的Function。尋址基本單元是功能，它的ID由Bus + Device + Function組成（BDF）
+
+- 一個PCIe系統，可以最多有256條Bus，每條Bus上最多可以掛32個設備，而每個設備最多又能實現8個Function，每個Function對應4KB的配置空間
+- 上電時，這些配置空間都需要映射到主機的內存地址空間（PCIe域，非DRAM區域）。這塊內存地址映射區域大小為：256×32×8×4KB=256MB
+
+只有RC才能發起Configuration的訪問請求，其他設備是不允許對別的設備進行Configuration讀寫的。
+
+<h2 id="5.7">5.7 TLP的路由</h2>
+
+PCIe共有三種路由方式：
+
+- 基於地址（Memory Address）路由
+- 基於設備ID（Bus Number + Device Number + Function Number）路由
+- 基於隱式（Implicit）路由
+
+![img135](./image/img135.PNG)
+
+地址路由
+
+- Switch負責路由和TLP的轉發，而路由信息是存儲在Switch的Configuration空間的
+- BAR0和BAR1沒有什麼好說，跟前節講的Endpoint的BAR意義一樣，存放Switch內部空間在主機內存空間映射基址。
+- Switch有一個上游端口（靠近RC）和若干個下游端口，每個端口其實是一個Bridge，都有一個Configuration
+  - 每個Configuration描述了其下面連接設備空間映射的範圍，分別由Memory Base和Memory Limit來表示
+  - 對上游端口，其Configuration描述的地址範圍是它下游所有設備的映射空間範圍
+  - 對每個下游端口的Configuration，描述了連接它端口設備的映射空間範圍
+
+- Memory Read或者Memory Write TLP的Header裡面都有一個地址信息，該地址是PCIe設備內部空間在內存中的映射地址（見圖5-40）。
+
+    ![img136](./image/img136.PNG)
+
+- 當一個Endpoint(一個Switch上游端口)收到一個Memory Read或者Memory WriteTLP，它會把TLP Header中的地址跟Configuration當中所有的BAR寄存器比較，如果TLP Header中的地址落在這些BAR的地址空間，那麼它就認為該TLP是發給它的，於是接收該TLP，否則就忽略，如圖5-41所示。
+
+    ![img137](./image/img137.PNG)
+
+- 當TLP不屬於一個Switch上游端口時，查看這個地址是否落在其下游設備的地址範圍內（是否在Memory Base和Memory Limit之間），如果是，說明該TLP是發給它下游設備的，因此它要完成路由轉發；如果地址不落在下游設備的地方範圍內，說明該TLP不是發給它下游設備的，則不接受該TLP，如圖5-42所示。
+
+    ![img138](./image/img138.PNG)
 
 
 
