@@ -81,6 +81,7 @@ If there is related infringement or violation of related regulations, please con
   - [5.5 PCIe TLP結構](#5.5)
   - [5.6 PCIe配置和地址空間](#5.6)
   - [5.7 TLP的路由](#5.7)
+  - [5.8 數據鏈路層](#5.8)
 
 
 
@@ -2024,6 +2025,52 @@ PCIe共有三種路由方式：
 
     ![img138](./image/img138.PNG)
 
+設備ID路由
+
+- ID = Bus Number + DeviceNumber + Function Number（BDF）能唯一找到某個設備的某個功能
+- 使用ID路由的TLP，其TLP Header中含有BDF信息（見圖5-43）
+
+    ![img139](./image/img139.PNG)
+
+  - 當一個Endpoint收到一個這樣的TLP，它用自己的ID和收到TLP Header中的BDF比較，如果是給自己的，就收下TLP，否則就拒絕。
+  - 不是一個Switch對應一個Configuration空間（Type1Header），而是Switch的每個Port都有一個Configuration空間（Type 1Header）。
+
+    ![img140](./image/img140.PNG)
+
+  - 看三個寄存器：Subordinate Bus Number、Secondary Bus Number和Primary Bus Number，如圖5-45所示。
+
+    ![img141](./image/img141.PNG)
+
+  - 對一個Switch來說：
+    - 每個Port靠近RC（上游）的那根Bus叫作Primary Bus，其Number寫在其Configuration Header中的Primary Bus Number寄存器
+    - 每個Port下面的那根Bus叫作Secondary Bus，其Number寫在其Configuration Header中的Secondary Bus Number寄存器
+    - 對上游端口，Subordinate Bus是其下游所有端口連接的Bus編號最大的那根Bus
+    - Subordinate Bus Number寫在每個Port的Configuration Header中的 Subordinate Bus Number寄存器。
+
+  - 當一個Switch收到一個基於ID尋址的TLP，首先檢查TLP中的BDF是否與自己的ID匹配，如匹配，說明該TLP是給自己的，收下；否則，檢查該TLP中的Bus Number是否落在Secondary Bus Number和Subordinate Bus Number之間。如果是，說明該TLP是發給其下游設備的，然後轉發到對應的下游端口；如果是其他情況，則拒絕這些TLP。
+
+隱式路由
+
+- 只有Message TLP才支持隱式路由。Message TLP還支持地址路由和ID路由，但以隱式路由為主。
+- 有些Message是與RC通信的，RC是該TLP的發送者或者接收者，因此沒有必要明明白白地指定地址或者ID，這種路由方式稱為隱式路由。
+- Message TLP的Header總是4DW，如圖5-47所示
+
+    ![img142](./image/img142.PNG)
+
+- Type域低3位決定了Message TLP路由方式
+
+    ![img143](./image/img143.PNG)
+
+  - 當一個Endpoint收到一個Message TLP，檢查TLP Header，如果是RC的廣播Message（011b）或者該Message終結於它（100b），它就接受該Message
+  - 當一個Switch收到一個Message TLP，檢查TLP Header，如果是RC的廣播Message（011b），則往它每個下游端口復制該Message然後轉發
+  - 如果下游端口收到發給RC的Message，則往上游端口轉發
+
+<h2 id="5.8">5.8 數據鏈路層</h2>
+
+數據鏈路層借助DLLP（Data Link Layer Packet，數據鏈路層的數據包）保證了TLP在數據總線上的正常傳輸，並使用了握手協議（Ack/Nak）和重傳（Retry）機制來保證數據傳輸的一致性和完整性。還包括TLP流量控制和電源管理等功能
+
+- 發送端：數據鏈路層接收上層傳來的TLP，它給每個TLP加上Sequence Number（序列號，下文都用“序列號”來闡述）和LCRC（Link CRC），然後轉交給物理層。
+- 接收端：數據鏈路層接收物理層傳來的TLP，檢測CRC和序列號，如果有問題，會拒絕接收該TLP，即不會傳到它的事務層，並且通知發送端重傳；如果該TLP沒有問題，數據鏈路層則去除TLP中的序列號和LCRC，交由它的事務層，並通知發送端TLP正確接收。
 
 
 
