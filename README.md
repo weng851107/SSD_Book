@@ -83,6 +83,7 @@ If there is related infringement or violation of related regulations, please con
   - [5.7 TLP的路由](#5.7)
   - [5.8 數據鏈路層](#5.8)
   - [5.9 物理層](#5.9)
+  - [5.10 PCIe Reset](#5.10)
 
 
 
@@ -2132,5 +2133,66 @@ DLLP大小為6B（物理層上加上頭尾，傳輸的是8B），格式如圖5-5
 
 ![img149](./image/img149.PNG)
 
+- 物理層從數據鏈路層獲得TLP或者是DLLP，然後放到TxBuffer裡
+- 物理層給TLP或者DLLP加入頭（Start code）和尾（End code、Gen 3沒有尾巴）
+- 給每個TLP或者DLLP加上邊界符號，這樣接收端就能把TLP或者DLLP區分開
+- TLP或者DLLP數據會分派到每個Lane上獨立傳輸。這個過程叫Byte Stripping，類似於串並轉換
+- 數據進入每條Lane後，分別加串擾（Scramble），目的是減少電磁干擾（EMI），手段是讓數據與隨機數據進行異或操作，輸出偽隨機數據，然後再發送出去
+- 加擾後的數據進行8/10編碼（Gen3是128/130編碼），讓數據流中的0和1個數相當，保持直流平衡；嵌入時鐘信息，PCIe不需要專門的時鐘進行信號傳輸
+- 最後進行並串轉換，發送到串行物理總線上去
+
+![img150](./image/img150.PNG)
+
+- 接收端逆向操作
+
+PCIe的三層
+
+- 事務層產生TLP，經過數據鏈路層和物理層傳輸給接收方
+  - 傳輸應用層或者命令層（事務層的頂頭上司）數據
+- 數據鏈路層產生DLLP，經過物理層傳輸到對方
+  - ACK/NAK、流控和電源管理
+- 物理層，不僅僅為上層TLP和DLLP做嫁衣，其實它也有自己的數據包定義，稱為Ordered Sets，簡稱OS
+  - 物理層用以管理鏈路的，比如鍊路訓練（LinkTraining）、改變鏈路電源狀態等
+
+    ![img151](./image/img151.PNG)
+
+<h2 id="5.10">5.10 PCIe Reset</h2>
+
+總線規定了兩個複位方式：Conventional Reset和Function Level Reset（FLR）
+
+![img152](./image/img152.PNG)
+
+Fundamental Reset：由硬件控制，會重啟整個設備，一般發生在整個系統Reset的時候（比如重啟電腦），
+
+Fundamental Reset有兩種：
+- Cold Reset：Power Off/On Device的Vcc（Vaux一直在）
+- Warm Reset（Optional）：保持Vcc的情況下由系統觸發，比如改變系統的電源管理狀態可能會觸發設備的Warm Reset，PCIe協議沒有定義具體如何觸發Warm Reset，而是把決定權交給系統
+
+PERST#（PCIe Express Reset）信號
+
+![img153](./image/img153.PNG)
+
+如果這塊PCIe設備支持PERST#信號：
+
+- 一個系統上電時，主電源穩定後會有“Power Good”信號
+- 這時ICH就會發PERST#信號給下面掛的PCIe SSD
+- 如果系統重啟，Power Good信號的變化會觸發PERST#的Assert和De-Assert，就可以實現PCIe設備的Cold Reset
+- 如果系統可以提供Power Good信號以外的方法觸發PERST#，就可以實現Warm Reset，PERST#信號會發送給所有PCIe設備，設備可以選擇使用這個信號，也可以不理它
+
+如果這塊PCIe設備不支持PERST#信號：
+
+- 上電時它會自動進行Fundamental Reset
+- 不支持PERST#信號的設備，必須能自己觸發Fundamental Reset。比如，偵測到3.3V後就觸發Reset（當設備發現供電超過其標準電壓時，必須觸發Reset）。
+
+Hot Reset：通過Assert TS1的Symbol 5的Bit[0]實現（見圖5-60）
+
+![img154](./image/img154.PNG)
+
+- 當PCIe SSD出現問題時，可以通過軟件觸發Hot Reset使其恢復
+- PCIe設備收到兩個連續的帶Hot Reset的TS1後，經過2ms的timeout：
+  - LTSSM經過Recovery和Hot Reset State，最終停在Detect
+  State（Link Training的初始狀態）；
+  - 設備所有的State Machine、硬件邏輯、Port State和Configuration Register（Sticky bit除外）全部回到初始值。
+- LTSSM(Link Training and Status State Machine )是PCIe最為核心的一個狀態機
 
 
