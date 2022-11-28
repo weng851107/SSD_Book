@@ -84,6 +84,11 @@ If there is related infringement or violation of related regulations, please con
   - [5.8 數據鏈路層](#5.8)
   - [5.9 物理層](#5.9)
   - [5.10 PCIe Reset](#5.10)
+  - [5.11 PCIe Max Payload Size和Max Read Request Size](#5.11)
+  - [5.12 PCIe SSD熱插拔](#5.12)
+  - [5.13 SSD PCIe链路性能损耗分析](#5.13)
+- [六、NVMe介紹](#6)
+  - [6.1 AHCI到NVMe](#6.1)
 
 
 
@@ -2194,5 +2199,217 @@ Hot Reset：通過Assert TS1的Symbol 5的Bit[0]實現（見圖5-60）
   State（Link Training的初始狀態）；
   - 設備所有的State Machine、硬件邏輯、Port State和Configuration Register（Sticky bit除外）全部回到初始值。
 - LTSSM(Link Training and Status State Machine )是PCIe最為核心的一個狀態機
+
+- 軟件還可以通過設置設備的Link Control Register（鏈路控制寄存器）–Link disable bit把設備disable掉（見圖5-61）
+
+    ![img155](./image/img155.PNG)
+
+  - 當設備的Link Disable bit被置上以後，會進入LTSSM Recovery State，開始向RC發送帶Disable bit的TS1（這個動作只能由EP發起，RC端這個bit是reserve的），如圖5-62所示。
+
+    ![img156](./image/img156.PNG)
+
+  - RC端收到這樣的TS1以後，其物理層會發送LinkUp=0的信號給鏈路層，之後所有的Lane都會進入Electrical Idle。
+  - 2ms timeout後，RC會進入LTSSM Detect mode，但是設備會一直停留在LTSSM的Disable狀態，等待重出江
+
+FLR（Function Level Reset）：
+
+- 不是所有的設備都支持FLR，需要檢查Device Capabilities Register（設備能力寄存器）的Bit28進行確認
+
+    ![img157](./image/img157.PNG)
+
+- 如果設備支持FLR，那麼軟件就可以通過Device Control Register（設備控制寄存器）的Bit15來進行Function Reset了，（見圖5-64）
+
+    ![img158](./image/img158.PNG)
+
+FLR會把對應Function的內部狀態，寄存器重置，但是以下寄存器不會受到影響：
+
+- Sticky bits——Cold Reset和Warm Reset都拿它們沒轍
+- HwInit類型的寄存器。在PCIe設備中，有效配置寄存器的屬性為HwInit，這些寄存器的值由芯片的配置引腳決定，後者上電複位後從EEPROM中獲取。 Cold Reset和Warm Reset可以復位這些寄存器，然後從EEPROM中重新獲取數據，但是使用FLR方式不能複位這些寄存器。
+- 一些特殊的配置寄存器。比如Captured Power、ASPM Control、Max_Payload_Size或者Virtual Channel
+- FLR不會改變設備的LTSSM狀態
+
+軟件在啟動FLR前，要注意是否有還沒完成的CplD
+
+- 要么等這些CplD完成再開始FLR
+- 要么啟動FLR以後等100ms以後再重新初始化這個Function
+
+如果不處理好，可能會導致Data Corruption——前一批事務要求的數據因為FLR的影響被誤傳給了後一批事務。
+
+- 確保其他軟件在FLR期間不會訪問這個Function
+- 把Command Register清空，讓Function自己待著
+- 輪循Device Status Register（設備狀態寄存器）的bit5（Transactions Pending）直到被Clear（這個bit=1代表還有未完成的CplD），如圖5-65所示，或者等待到Completion Timeout的時間，如果Completion Timeout沒有被Enable，等100ms
+
+    ![img159](./image/img159.PNG)
+
+- 初始化FLR然後等100ms
+- 重新配置Function並Enable
+
+在FLR過程中：
+
+- 這個Function對外不能被使用
+- 不能保留之前的任何可以被讀取的信息（比如內部的Memory需要被清零或者改寫）
+- 回复要求FLR的Cfg Request，並開始FLR
+- 對於發進來的TLP可以回复UC（Unexpected Completion）或者直接丟掉
+- FLR應該在100ms之內完成，但是其後的初始化還需要花一些時間，在初始化過程中如果收到Cfg Request，可以回复CRS（Configuration Retry Status）
+
+總結Reset退出：
+
+- 從Reset狀態退出後，必須在20ms內開始Link Training
+- 軟件需要給Link充分的時間完成Link Training和初始化，至少要等上100ms才能開始發送Cfg Request
+- 如果軟件等了100ms開始發Cfg Request，但是設備還沒初始化完成，設備會回复CRS
+- 這時RC可以選擇重發Cfg Request或者上報CPU說設備還沒準備好
+- 設備最多可以有1s時間（從PCI那繼承來的），之後必須能夠正常工作，否則System/RC則可以認為設備掛了
+
+<h2 id="5.11">5.11 PCIe Max Payload Size和Max Read Request Size</h2>
+
+在Device Control Register（設備控制寄存器）裡，如圖5-66所示，分別由bit[14∶12]和bit[7∶5]控制
+
+![img160](./image/img160.PNG)
+
+**1. Maximum Payload Size（簡稱MPS）**
+
+- 控制一個TLP可以傳輸的最大數據長度
+
+PCIe協議允許一個最大的Payload可以到4KB，但是規定了在整個傳輸路徑上的所有設備，都必須使用相同的MPS設置，同時不能超過該路徑上任何一個設備的MPS能力值
+
+系統的MPS值設置是在上電以後的設備枚舉配置階段完成的
+PCIe SSD自身的MPS capability則是在其PCIe core初始化階段設置的
+
+- 以主板上的PCIe RC和PCIe SSD為例，它們都在Device Capability Register裡聲明自己能支持的各種MPS
+- OS的PCIe驅動偵測到他們各自的能力值，然後挑低的那個設置到兩者的Device Control Register中
+
+**2. Maximum Read Request Size**
+
+- 用於控制一個Memory Read的最大Size，最大4KB（以128Byte為單位）
+
+在配置階段，OS的PCIe驅動也會配置另外一個參數Maximum Read Request Size
+
+Read Request Size是可以大於MPS的
+
+- 例如給一個MPS=128Byte的PCIe SSD發一個512Byte的Read Request，PCIe SSD可以通過返回4個128Byte的Cpld，或者8個64Byte的Cpld來完成這個Request的響應。
+
+為了提高特別是大Block Size Data的傳輸效率，可以盡量把Read Request Size設得大一點，用更少的次數傳遞更多的數據。
+
+<h2 id="5.12">5.12 PCIe SSD熱插拔</h2>
+
+PCIe SSD最早是Fusion-IO推出來的，以閃存卡的形式被互聯網公司和數據中心廣泛使用，閃存卡一般作為數據緩存來使用，有以下缺點：
+
+- 插在服務器主板的PCIe插槽上，數量有限
+- 通過PCIe插槽供電，單卡容量受到限制
+- 在PCIe插槽上，容易出現由於散熱不良導致宕機的問題
+- 不能熱插拔，如果發現PCIe閃存卡有故障，必須要停止服務，關閉服務器，打開機箱，拔出閃存卡
+
+U.2PCIe SSD類似於傳統的盤位式SATA、SAS硬盤，可以直接從服務器前面板熱插拔
+
+![img161](./image/img161.PNG)
+
+傳統SATA、SAS硬盤通過HBA和主機通信，所以也是通過HBA來管理熱插拔
+
+- 主機匯流排配接器（host bus adapter，HBA）是以電腦為主機系統，連接其他網路或儲存裝置的電腦硬體
+
+PCIe SSD直接連到CPU的PCIe控制器，熱插拔需要驅動直接管理
+一般熱插拔PCIe SSD需要幾方面的支持：
+
+- PCIe SSD：
+  - 硬件支持，避免SSD在插盤過程中產生電流波峰導致器件損壞
+  - 控制器要能自動檢測到拔盤操作，避免數據因掉電而丟失
+- 服務器背板PCIe SSD插槽：通過服務器廠家了解是否支持U.2SSD熱插拔
+- 操作系統：要確定熱插拔是操作系統還是BIOS處理
+- PCIe SSD驅動：不管是Linux內核自帶的NVMe驅動，還是廠家提供的驅動
+
+拔出PCIe SSD的基本流程如下：
+
+1. 配置應用程序，停止所有對目標SSD的訪問。如果某個程序打開了該SSD中的某個目錄，也需要退出；
+2. umount目標SSD上的所有文件系統；
+3. 卸載SSD驅動程序，從系統中刪除已註冊的塊設備和disk；
+4. 拔出SSD。
+
+<h2 id="5.13">5.13 SSD PCIe链路性能损耗分析</h2>
+
+**1. Encode和Decode**
+
+Gen1或者Gen2，正常的1個Byte數據，經過8bit/10bit轉換在實際物理鏈路上傳輸的時候就變成了10bit，也就是一個Symbol，8bit/10bit轉換會帶來20%的性能損耗
+
+Gen3，由於是128/130編碼，這部分性能損耗可以忽略
+
+**2. TLP Packet Overhead**
+
+![img162](./image/img162.PNG)
+
+PCIe必須靠Transaction Layer（事務層或傳輸層）、Link Layer（鏈路層）和PHY（物理層）來保證傳輸數據包（Payload）的可靠性
+
+每個TLP會帶來20～30Byte的額外開銷
+
+**3. Traffic Overhead**
+
+PCIe協議為了進行時鐘偏差補償，會發送Skip，作用有點像SATA協議的ALIGN
+
+Gen1/Gen2一個Skip是4Byte，Gen3是16Byte，Skip是定期發送的
+
+PCIe協議不允許在TLP中間插入Skip Order-set，只能在兩個TLP的間隔中間發
+
+**4. Link Protocol Overhead**
+
+PCIe協議中，RC（主機）和EP（PCIe SSD）之間發送的每一個TLP，都需要對方告知接收的情況
+
+PCIe要求每一個TLP，都需要對方發送ACK確認，但是允許對方接收幾個TLP以後再發一個ACK確認，這樣可以減少ACK發送的數量，對性能有所幫助。
+
+**5. Flow control**
+
+自帶一個流控機制，目的是防止接收方receiver buffer overflow
+
+RC跟EP之間通過交換一種叫UpdateFC的DLLP來告知對方自己目前receive buffer的情況，顯然發送這個也會佔用帶寬，從而對性能產生影響
+
+**6. System Parameters**
+
+System Parameters主要有三個：
+
+- MPS（Max Payload Size）
+- Max Read Request Size
+- RCB（Read Completion Boundary）
+
+RC允許使用多個CplD回復一個Read Request，而這些回复的CplD通常以64Byte或128Byte為單位（也有32Byte的），原則就是在Memory裡做到地址對齊。
+
+$$
+Bandwidth=[（Total Transfer Data Size）/（Transfer Time）]
+$$
+
+已知條件：
+
+```Text
+200個MemWr TLP；
+MPS=128；
+PCIe Gen1x8。
+```
+
+準備活動：
+
+```Text
+計算Symbol Time，2.5Gbps換算成1個Byte傳輸時間是4ns；
+8個Lane，所以每4ns可以傳輸8個Byte；
+TLP傳輸時間：[（128Bytes Payload+20Byte overhead）/8Byte/Clock]×[4ns/Clock]=74ns；
+DLLP傳輸時間：[8Bytes/8Byte/Clock]×[4ns/Clock]=4ns
+```
+
+假設：
+
+```Text
+每5個TLP回复1個ACK；
+每4個TLP發送一個FC Update。
+```
+
+正式計算：
+
+```Text
+總共的數據：200×128Byte=25600Byte；
+傳輸時間：200×74ns+40×4ns+50×4ns=15160ns；
+性能：25600Bytes/15160ns=1689MB/s。
+```
+
+可將MPS調整到了512B。重新計算，結果增加到了1912MB/s，看到這個數字可知，以前的SATA SSD可以退休了
+
+<h1 id="6">六、NVMe介紹</h1>
+
+<h2 id="6.1">6.1 AHCI到NVMe</h2>
 
 
