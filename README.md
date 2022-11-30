@@ -89,6 +89,7 @@ If there is related infringement or violation of related regulations, please con
   - [5.13 SSD PCIe链路性能损耗分析](#5.13)
 - [六、NVMe介紹](#6)
   - [6.1 AHCI到NVMe](#6.1)
+  - [6.2 NVMe總述](#6.2)
 
 
 
@@ -2411,5 +2412,153 @@ DLLP傳輸時間：[8Bytes/8Byte/Clock]×[4ns/Clock]=4ns
 <h1 id="6">六、NVMe介紹</h1>
 
 <h2 id="6.1">6.1 AHCI到NVMe</h2>
+
+HDD和早期的SSD：SATA接口 + AHCI（Advanced Host Controller Interface）系統接口協議標準
+
+- AHCI支持NCQ（Native CommandQueuing）功能和熱插拔技術，NCQ最大深度為32，即主機最多可以發32條命令給HDD或者SSD執行
+
+整個系統的性能瓶頸在硬盤端（低速，高延時），而不是在協議和接口端，隨著SSD技術的飛速發展，AHCI和SATA已經不能滿足高性能和低延時SSD的需求
+
+由 PCIe接口 + NVMe（Non-Volatile Memory Express，是非易
+失性存儲器標準）系統接口協議標準 的SSD就此誕生
+
+需要指出的是，在移動設備上，NVMe也佔有一席之地。蘋果自iPhone 6s開始，其存儲設備上跑的就是NVMe協議標準。未來移動存儲的方向，筆者認為不是UFS，當然更不會是eMMC，而是NVMe
+
+---
+
+市面上常見的手機快閃記憶體標準共有 eMMC、UFS 與 NVMe
+
+- Android 手機主要採用 eMMC 與 UFS 標準
+- NVMe 則是蘋果 iPhone 所使用的快閃記憶體標準
+
+eMMC（embedded MultiMedia Card）：
+
+- 由 MMC 協會針對手機或平板電腦訂立的快閃記憶體標準
+- 由 MMC 記憶卡發展而來，採用「並行傳輸」技術製成，讀寫必須分開執行，雖然僅提供單路讀寫功能，但仍具備體積小、高度集成與低複雜度的優勢
+- eMMC 5.1 標準，連續讀取速度約為 250MB/s
+
+UFS（Universal Flash Storage）：
+
+- 由 JEDEC 於 2011 年推出，採用全新「串行傳輸」技術，可同時讀寫操作
+- UFS 3.1 標準，連續讀取速度約為 1,700MB/s
+
+![img163](./image/img163.PNG)
+
+NVMe（NVM Express）：
+
+- 原先是運用在 MacBook 上的主流固態記憶體標準之一，具備高效率、低負載、低延時的特性
+- 蘋果自 2015 年起首度將 NVMe 導入 iPhone 6S 系列中，連續讀取速度約為 900MB/s
+- 早期 Android 手機多是使用 eMMC 5.1 標準，因此在連續讀取速度方面，iPhone 擁有絕對領先的優勢，直至 UFS 3.0 問世後兩者差距才逐漸縮小
+
+---
+
+NVMe和AHCI相比，它的優勢主要體現在以下幾點：
+
+1. 低時延（Latency）
+
+- 造成硬盤存儲時延的三大因素：
+
+  - 存儲介質層面：閃存（Flash）比傳統機械硬盤速度快太多
+  - 控制器方面：PCIe主控與CPU直接相連，而不像傳統方式，要通過南橋控制器中轉再連接CPU
+  - 軟件接口方面：
+    - NVMe縮短了CPU到SSD的指令路徑 --> NVMe減少了對寄存器的訪問次數
+    - 使用了MSI-X中斷管理
+    - 並行&多線程優化 --> NVMe減少了各個CPU核之間的鎖同步操作
+
+- SATA接口對數據操作時，數據會先從硬碟讀取到內存，再將數據提取至CPU內部進行計算，計算後在反饋給內存，最後寫入至硬碟
+- PCIe接口的數據會直接通過總線與CPU直連，省去內存調用硬碟的過程，傳輸速率與速度都提升
+
+2. 高性能（Throughput&IOPS）
+
+- 隊列深度：可以在端口隊列中等待服務的I/O請求數量
+
+  - SAS和SATA可以分別處理254和32的隊列深度
+  - 使用SAS和SATA，排隊的I/O請求數量很容易成為瓶頸。為了避免I/O請求由於超出隊列深度而失敗，你必須創建許多HDD的LUN，以便所有I/O都能夠快速進行
+
+- AHCI只有一個命令隊列，最多同時只能發32條命令
+
+- $IOPS=隊列深度/IO延遲$，故IOPS的性能與隊列深度有正關係
+
+- 目前高端的企業級PCIe SSD，其隊列深度可能要達到128，甚至是256才能夠發揮出最高的IOPS性能。
+
+- 在NVMe標準下，最大的隊列深度可達64K
+
+3. 低功耗
+
+- NVMe加入了自動功耗狀態切換和動態能耗管理功能
+
+<h2 id="6.2">6.2 NVMe總述</h2>
+
+NVMe是一種主機（Host）與SSD之間通信的協議，它在協議棧中隸屬高層，如圖6-3所示。
+
+![img164](./image/img164.PNG)
+
+NVMe作為命令層和應用層協議，理論上可以適配在任何接口協議上。但NVMe協議的原配是PCIe。
+
+NVMe是為SSD所創建的協議, 而AHCI是為傳統HDD服務的。
+
+![img165](./image/img165.PNG)
+
+NVMe制定了主機與SSD之間通信的命令，以及命令如何執行的。 NVMe有兩種命令，如圖6-6所示：
+
+- 一種叫Admin命令，用以主機管理和控制SSD
+- 另外一種就是I/O命令，用以主機和SSD之間數據的傳輸
+
+![img166](./image/img166.PNG)
+
+跟SATA規範中定義的命令相比，NVMe的命令個數少了很多，完全是為SSD量身定制的
+
+![img167](./image/img167.PNG)
+
+![img168](./image/img168.PNG)
+
+主機又是怎麼把這些命令發送給SSD執行呢？
+
+NVMe有三寶：SQ和CQ位於主機的內存中，DB則位於SSD的控制器內部
+
+- Submission Queue（SQ）
+- Completion Queue（CQ）
+- Doorbell Register（DB）
+
+![img169](./image/img169.PNG)
+
+- NVMe子系統一般就是SSD
+
+- SSD作為一個PCIe Endpoint（EP）通過PCIe連著Root Complex（RC），然後RC連接著CPU和內存
+
+NVMe三寶的用途：
+
+- SQ位於主機內存中，主機要發送命令時，先把準備好的命令放在SQ中，然後通知SSD來取
+
+- CQ也是位於主機內存中，一個命令執行完成，成功或失敗，SSD總會往CQ中寫入命令完成狀態
+
+- DB位於SSD的控制器內部，主機發送命令時，不是直接往SSD中發送命令，而是把命令準備好放在自己的內存中，那怎麼通知SSD來獲取命令執行呢？主機就是通過寫SSD端的DB寄存器來告知SSD的
+
+NVMe是如何處理命令的?
+
+![img170](./image/img170.PNG)
+
+1. 主機寫命令到SQ
+2. 主機寫SQ的DB，通知SSD取指
+3. SSD收到通知後，到SQ中取指
+4. SSD執行指令
+5. 指令執行完成，SSD往CQ中寫指令執行結果
+6. SSD發中斷通知主機指令完成
+7. 收到中斷，主機處理CQ，查看指令完成狀態
+8. 主機處理完CQ中的指令執行結果，通過DB回复SSD：指令執行結果已處理
+
+<h2 id="6.3">6.3 SQ、CQ和DB</h2>
+
+主機往SQ中寫入命令，SSD往CQ中寫入命令完成結果。
+
+- SQ與CQ的關係，可以是一對一的關係，也可以是多對一的關係，但不管怎樣，它們是成對的：有因就有果，有SQ就必然有CQ
+
+有兩種SQ和CQ：
+
+- 一種是Admin SQ/CQ：用以主機管理控制SSD
+- 一種是IO SQ/CQ：用以主機與SSD之間傳輸數據
+
+IO SQ/CQ是通過Admin命令創建的
+
 
 
