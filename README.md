@@ -90,6 +90,12 @@ If there is related infringement or violation of related regulations, please con
 - [六、NVMe介紹](#6)
   - [6.1 AHCI到NVMe](#6.1)
   - [6.2 NVMe總述](#6.2)
+  - [6.3 SQ、CQ和DB](#6.3)
+  - [6.4 尋址雙雄：PRP和SGL](#6.4)
+  - [6.5 Trace分析](#6.5)
+  - [6.6 NVMe中端到端的數據保護功能](#6.6)
+  - [6.7 Namespace](#6.7)
+  - [6.8 NVMe over Fabrics](#6.8)
 
 
 
@@ -2558,7 +2564,418 @@ NVMe是如何處理命令的?
 - 一種是Admin SQ/CQ：用以主機管理控制SSD
 - 一種是IO SQ/CQ：用以主機與SSD之間傳輸數據
 
-IO SQ/CQ是通過Admin命令創建的
+系統中只有1對Admin SQ/CQ，IO SQ/CQ卻可以有很多，多達65535對（64K減去1對Admin SQ/CQ），如圖6-11所示
+
+![img171](./image/img171.PNG)
+
+主機端每個CPU核（Core）可以有一個或者多個SQ，但只有一個CQ
+
+1. 性能需求，一個CPU核中有多線程，可以做到一個線程獨享一個SQ
+2. QoS (Quality of Service，服務質量)需求
+
+    ```Text
+    同時下載與觀看電影，將看電影所需的命令放到高優先級的SQ，
+    迅雷下載所需的命令放到低優先級的SQ，因此電腦就能把有限的資源優先滿足需求, 
+    即看電影不會卡頓，便是好的QoS
+    ```
+
+實際系統中用多少個SQ，取決於系統配置和性能需求，可靈活設置I/O SQ個數，可參考下表的配置
+
+![img172](./image/img172.PNG)
+
+NVMe Spec對Admin SQ/CQ和IO SQ/CQ有不同的約定：
+
+- 系統中只有一對Admin SQ/CQ，則可以有最多64K對IO SQ/CQ;
+- Admin SQ/CQ的隊列深度是2~4K；而IO SQ/CQ的隊列深度是2~64K;
+
+注: Admin/IO command (SQ)大小為64Bytes，對應的Completion (CQ)大小為16Bytes。
+
+- Admin SQ和CQ是一對一的，而IO SQ和CQ可以一對一，也可以多對一。多個SQ可以支持多線程工作，不同SQ之間可以賦予不同的優先級;
+- Admin和IO的SQ/CQ均放在Host端Memory中；
+- SQ由Host來更新，CQ則由NVMe Controller更新。
+
+Note:
+
+- AHCI只有一個命令隊列，且隊列深度是固定的32
+- PCIe接口，可以有1、2、4、8、12、16、32條lane，而SATA只有單一lane
+
+在NVMe Spec中定義SQ/CQ均是循環隊列，除了隊列深度、隊列內容，還有隊列的頭部（Head）和尾部（Tail）
+
+![img173](./image/img173.PNG)
+
+隊伍頭部的那個正在被服務或者等待被服務，一旦完成，就離開隊伍，尾巴決定新來的人站的位置
+
+DB是在SSD端的寄存器，記錄SQ和CQ的頭和尾巴的位置，每個SQ或者CQ，都有兩個對應的DB：
+
+- Head DB
+- Tail DB
+
+隊列生產者/消費者（Producer/Consumer）模型。生產者往隊列的尾部寫入東西，消費者從隊列的頭部取出東西：
+
+1. 開始假設SQ1和CQ1是空的，Head=Tail=0
+
+    ![img174](./image/img174.PNG)
+
+2. 主機往SQ1寫入三個命令後，更新SSD控制器端的 SQ1 Tail DB 寄存器，值為3，通知SSD控制器：有新命令
+
+    ![img175](./image/img175.PNG)
+
+3. SD控制器收到通知後，把SQ1的三個命令都取回來執行。 SSD控制器會把Head調整為3並寫入本地的 SQ1 Head DB 寄存器
+
+    ![img176](./image/img176.PNG)
+
+4. SSD執行完了兩個命令，更新CQ1對應的Tail DB寄存器，值為2。同時發消息給主機：有命令完成
+
+    ![img177](./image/img177.PNG)
+
+5. 主機收到SSD的通知（中斷信息），於是從CQ1中取出那兩條完成信息，處理完畢後往SSD CQ1 Head DB寄存器中寫入CQ1的head，值為2
+
+    ![img178](./image/img178.PNG)
+
+對SQ來說：
+
+- SSD是消費者，所以SQ head DB由SSD自己維護；
+- 主機是生產者，所以SQ Tail DB由主機來更新
+- SSD結合SQ的頭和尾，就知道還有多少命令在SQ中等待執行了
+
+對CQ來說：
+
+- SSD是生產者，所以CQ Tail DB由自己更新
+- 主機是消費者，所以CQ Head DB由主機更新
+- SSD根據CQ的頭和尾，就知道CQ還能不能，以及能接受多少命令完成信息
+
+DB也有通知作用：
+
+- 主機更新SQ Tail DB的同時，也是在告知SSD有新的命令需要處理
+- 主機更新CQ Head DB的同時，也是在告知SSD，你返回的命令完成狀態信息我已經處理
+
+主機對DB只能寫（還僅限於寫SQ Tail DB和CQ Head DB），不能讀取DB。在這個限制下，我們看看主機是怎樣維護SQ和CQ的?
+
+- SQ Tail DB沒有問題，主機是生產者，對新命令來說，它清楚自己應該站在隊伍哪裡
+- 但是SQ Head DB呢？主機發了取指通知後，它並不清楚SSD什麼時候去取命令、取了多少命令
+  - SSD往CQ中寫入命令狀態信息的同時，還把SQ Head DB的信息告知了主機
+
+    ![img179](./image/img179.PNG)
+
+- CQ Head DB，主機是消費者，知道它隊列的頭部
+- 但是CQ Head DB呢？SSD怎麼告訴主機呢？
+  - 還是通過SSD返回命令狀態信息獲取
+  - SSD在往CQ中寫入命令完成條目時，會把“P”寫成1，CQ是在主機端的內存中，主機可以檢查CQ中的所有內容，主機記住上次隊列的尾部，然後往下一個一個檢查“P”，就能得出新的隊列尾部了
+
+    ![img180](./image/img180.PNG)
+
+<h2 id="6.4">6.4 尋址雙雄：PRP和SGL</h2>
+
+核心思想：我是誰？我從哪裡來？我要去哪裡？
+
+- 我是數據，我從主機端來，要到SSD去
+  - 主機如果想往SSD上寫入用戶數據，需要告訴SSD寫入什麼數據，寫入多少數據，以及數據源在內存中的什麼位置
+- 我是數據，我從SSD來，要去主機端
+  - 主機如果想讀取SSD上的用戶數據，同樣需要告訴SSD需要什麼數據，需要多少數據，以及數據最後需要放到主機內存的哪個位置上去
+
+在主機向SSD發送的Write/Read命令中都會有這些資訊
+
+Write：
+
+- 每筆用戶數據對應著一個叫作LBA（Logical Block Address）的東西，Write命令通過指定LBA來告訴SSD寫入的是什麼數據
+- SSD收到Write命令後，通過PCIe去主機的內存數據所在位置讀取數據，然後把這些數據寫入閃存中，同時生成LBA與閃存位置的映射關係
+
+Read：
+
+- SSD根據LBA，查找映射表（寫入時生成的），找到對應閃存物理位置，然後讀取閃存獲得數據。通過PCIe把數據寫入主機指定的內存中。這樣就完成了主機對SSD的讀訪問
+
+是主機在與SSD的數據傳輸過程中，主機是被動的一方，SSD是主動的一方：
+
+- 主機需要數據，是SSD主動把數據寫入主機的內存中
+- 主機寫數據，同樣是SSD主動去主機的內存中取數據，然後寫入閃存
+
+主機有兩種方式來告訴SSD數據所在的內存位置：
+
+- PRP（Physical Region Page，物理區域頁）
+- SGL（Scatter/Gather List，分散/聚集列表）
+
+PRP：
+
+![img181](./image/img181.PNG)
+
+- NVMe把主機端的內存劃分為一個一個物理頁（Page），頁的大小可以是4KB，8KB，16KB，…，128MB
+
+- PRP Entry本質就是一個64位內存物理地址，只不過把這個物理地址分成兩部分：頁起始地址和頁內偏移
+- 最後兩比特是0，說明PRP表示的物理地址只能四字節對齊訪問
+- 一個 PRP Entry 描述的是一個物理頁空間
+
+    ![img182](./image/img182.PNG)
+
+- 若干個PRP Entry連接起來，就成了PRP鍊錶（List），如圖6-24所示
+
+    ![img183](./image/img183.PNG)
+
+- PRP鍊錶中的每個PRP Entry的偏移量都必須是0，PRP鍊錶中的每個PRP Entry都是描述一個物理頁。它們不允許有相同的物理頁
+
+- 每個NVMe命令中有兩個域：PRP1和PRP2，主機就是通過這兩個域告訴SSD數據在內存中的位置或者數據需要寫入的地址，如表6-2所示。
+
+    ![img184](./image/img184.PNG)
+
+- 一個PRP1指向PRP鍊錶的示例，如圖6-25所示
+
+    ![img185](./image/img185.PNG)
+
+
+對Admin命令來說，它只用PRP告訴SSD內存物理地址；
+
+對I/O命令來說，除了用PRP，主機還可以用SGL的方式來告訴SSD數據在內存中寫入或者讀取的物理地址，如表6-3所示。
+
+![img186](./image/img186.PNG)
+
+主機在命令中會告訴SSD採用何種方式：
+
+- CDW0[15：14] = 00b，就是PRP的方式
+- CDW0[15：14] = 01b，就是SGL的方式
+
+SGL：
+
+- SGL（Scatter Gather List）是一個數據結構, 是個鏈表(List)，用以描述一段數據空間，這個空間可以是數據源所在的空間，也可以是數據目標空間
+- SGL由一個或者多個SGL段（Segment）組成，而每個SGL段又由一個或者多個SGL描述符（Descriptor）組成
+- SGL描述符是SGL最基本的單元，它描述了一段連續的物理內存空間：起始地址+空間大小。
+- 每個SGL描述符大小是16字節。一塊內存空間，可以用來放用戶數據，也可以用來放SGL段，根據這段空間的不同用途，SGL描述符也分幾種類型，如表6-4所示
+
+    ![img187](./image/img187.PNG)
+
+  - 數據塊描述符：描述的這段空間是用戶數據空間
+  - 段描述符：前面一個段就需要有個指針指向下一個段，這個指針就是SGL段描述符，它描述的是它下一個段所在的空間
+  - 末段描述符：讓SSD在解析SGL的時候，碰到SGL末段描述符，就知道鍊錶只剩下一個段
+  - 位桶描述符：它只對主機讀有用，用以告訴SSD，你往這個內存寫入的東西我是不要的
+
+    ![img188](./image/img188.PNG)
+
+- 舉例：假設主機需要從SSD中讀取13KB的數據，其中真正只需要11KB數據，這11KB的數據需要放到3個大小不同的內存中，分別是：3KB、4KB和4KB
+
+    ![img189](./image/img189.PNG)
+
+無論是PRP還是SGL，本質都是描述內存中的一段數據空間，這段數據空間在物理上可能是連續的，也可能是不連續的
+
+NVMe1.0的時候只有PRP，SGL是NVMe1.1之後引入的
+
+SGL和PRP本質的區別在哪？
+
+- PRP描述的是物理頁
+- SGL可以描述任意大小的內存空間
+
+    ![img190](./image/img190.PNG)
+
+NVMe over PCIe (目前所講的都是NVMe跑在PCIe上)：
+
+- Admin命令只支持PRP
+- I/O命令可以支持PRP或者SGL
+
+NVMe over Fabrics：所有命令只支持SGL
+
+<h2 id="6.5">6.5 Trace分析</h2>
+
+PCIe定義了下三層，NVMe定義了最上層，構成一個完整的主機與SSD通信的協議
+
+![img191](./image/img191.PNG)
+
+- 在NVMe層，我們能看到的是64字節的命令、16字節的命令返回狀態，以及跟命令相關的數據
+
+- 在PCIe的事務層，我們能看到的是事務層數據包（Transaction Layer Packet），即TLP
+
+PCIe事務層作為NVMe最直接的服務者，不管你NVMe發給我的是命令，還是命令狀態，或者是用戶數據，我統統幫你放進包裹，打包後交給下一層，即數據鏈路層繼續處理，如圖6-30所示。
+
+![img192](./image/img192.PNG)
+
+PCIe事務層傳輸的是TLP，它就是個包裹，一般由包頭和數據組成，當然也有可能只有包頭沒有數據。 NVMe傳下來的數據都是放在TLP的數據部分的（Payload）
+
+TLP可分為以下幾種類型：
+
+- Configuration Read/Write
+- I/O Read/Write
+- Memory Read/Write
+- Message
+- Completion
+
+在NVMe命令處理過程中，PCIe事務層基本只用Memory Read/Write TLP來為NVMe服務
+
+主機發送一個Read命令，PCIe是如何服務的？
+
+![img193](./image/img193.PNG)
+
+1. 主機準備了一個Read命令給SSD
+
+    ![img194](./image/img194.PNG)
+
+   - 主機需要從起始LBA 0x20E0448（SLBA）上讀取128個DWORD（512字節）的數據到內存地址是0x14ACCB000
+
+   - 這個命令放在編號為3的SQ裡（SQID=3），CQ編號也是3（CQID=3）
+
+2. 主機通過寫SQ的Tail DB，通知SSD來取命令
+
+    ![img195](./image/img195.PNG)
+
+   - PCIe是通過一個Memory Write TLP來實現主機寫SQ的Tail DB的
+   - 一個主機，下面可能連接著若干個Endpoint，主機怎樣才能準確更新該SSD控制器中的Tail DB寄存器
+   - 在上電的過程中，每個Endpoint（在這裡是SSD）的內部空間都會通過內存映射（Memory Map）的方式映射到主機的內存（Memory）地址空間中，SSD控制器當中的寄存器會被映射到主機的內存地址空間，當然也包括Tail DB寄存器
+   - 主機在用MemoryWrite寫的時候，Address只需設置該寄存器在主機內存中映射的地址，就能準確寫入該寄存器
+
+3. SSD收到通知，去主機端的SQ中取指令
+
+    ![img196](./image/img196.PNG)
+
+   - SSD是通過發一個Memory Read TLP到主機的SQ中取指令
+   - PCIe需要往主機內存中讀取16個DWORD的數據 (因為每個NVMe命令的大小是64個字節)
+   - SSD往主機發送了一個Memory Read的請求，主機通過Completion的方式把命令數據返回給SSD
+
+4. SSD執行讀命令，把數據從閃存中讀到緩存中，然後把數據傳給主機
+
+    ![img197](./image/img197.PNG)
+
+   - 數據從閃存中讀到緩存中，這是SSD內部的操作，跟PCIe和NVMe沒有任何關係，因此，我們捕捉不到SSD的這個行為
+   - SSD通過Memory Write TLP把主機命令所需的128個DWORD數據寫入主機命令所要求的內存中去。 SSD每次寫入32個DWORD，一共寫了4次
+
+5. SSD往主機的CQ中返回狀態
+
+    ![img198](./image/img198.PNG)
+
+   - SSD是通過Memory Write TLP把16個字節的命令完成狀態信息寫入主機的CQ中
+
+6. SSD採用中斷的方式告訴主機去處理CQ
+
+    ![img199](./image/img199.PNG)
+
+   - NVMe/PCIe有四種方式給SSD中斷主機：
+
+     - Pin-Based Interrupt
+     - Single Message MSI
+     - Multiple Message MSI
+     - MSIX
+
+   - 本書使用MSI-X中斷方式，不是通過硬件引腳的方式，而是和正常的數據信息一樣，通過PCIe打包把中斷信息告知主機
+
+   - SSD還是通過Memory Write TLP把中斷信息告知主機，這個中斷信息長度是1DWORD
+
+7. 主機處理相應的CQ
+
+   - 在主機端內部發生的事情，在Trace上我們捕捉不到這個處理過程
+
+8. 更新SSD端的CQ Head DB，告知SSD CQ處理完畢
+
+    ![img200](./image/img200.PNG)
+
+   - 主機還是通過Memory Write TLP更新SSD端的CQ Head DB
+
+事務層基本都是通過Memory Write和Memory Read TLP傳輸NVMe命令、數據和狀態等信息
+
+<h2 id="6.6">6.6 NVMe中端到端的數據保護功能</h2>
+
+一端是主機的內存空間，一端是SSD的閃存空間，保護的是用戶數據
+
+主機與SSD之間，數據傳輸的最小單元是邏輯塊（Logical Block，LB），每個邏輯塊大小可以是512/1024/2048/4096等字節，主機在格式化SSD的時候，邏輯塊大小就確定了，之後兩者就按這個邏輯塊大小進行數據交互
+
+
+主機與SSD之間傳輸數據：
+
+![img201](./image/img201.PNG)
+
+- 數據從主機到NVM（Non-Volatile Memory，目前一般是閃存，後面我就用閃存來代表NVM），首先要經過PCIe傳輸到SSD的控制器，然後控制器把數據寫入閃存
+
+- 主機想從閃存上讀取數據，首先要由SSD控制器從閃存上獲得數據，然後經過PCIe把數據傳送給主機
+
+NVMe透過元數據（Meta Data）提供了一個端到端的數據保護功能來確保主機與閃存之間數據的完整性
+
+元數據有兩種存在方式：
+
+- 作為邏輯塊數據的擴展，和邏輯塊數據放一起傳輸
+
+    ![img202](./image/img202.PNG)
+
+- 邏輯塊數據和元數據分別傳輸
+
+    ![img203](./image/img203.PNG)
+
+- Note: NVMe over Fabrics只支持元數據和邏輯數據放一起
+
+元數據（Meta Data）數據格式：
+
+![img204](./image/img204.PNG)
+
+- Guard：16比特的CRC（Cyclic Redundancy Check），它是邏輯塊數據算出來的。能夠檢測出數據是否有錯。
+- Application Tag：這塊區域對控制器不可見，為主機所用
+- Reference Tag：將用戶數據和地址（LBA）相關聯，防止數據錯亂。保證數據不會出現張冠李戴的問題，比如我讀LBA x，結果卻讀到了LBA y的數據。
+
+    ![img205](./image/img205.PNG)
+
+帶數據保護信息數據寫流程
+
+![img206](./image/img206.PNG)
+
+- 主機數據通過PCIe傳輸到SSD控制器時，SSD控制器會重新計算邏輯塊數據的CRC，與保鏢的CRC比較，如果兩者匹配，說明數據傳輸是沒有問題的；
+
+- 檢測Reference Tag，看看這個沒有CRC問題的數據是不是該主機寫命令對應的數據
+
+- SSD控制器會把邏輯塊數據和PI一同寫入閃存中
+
+帶數據保護信息數據讀流程
+
+![img207](./image/img207.PNG)
+
+- SSD控制器讀閃存的時候，會對讀上來的數據進行CRC校驗，如果寫入的時候帶有PI，這個時候就能檢測出讀上來的數據是否正確，從而決定這個數據要不要傳給主機
+- 雖然寫入閃存中的數據是受ECC保護，但在SSD內部，數據從控制器到閃存之間，一般都要經過DRAM或者SRAM，在之前SSD控制器寫入閃存，或者這個時候從閃存讀數據到SSD控制器，可能就會發生比特翻轉之類的小概率事件，從而導致數據不正確。
+- 檢測Reference Tag
+
+主機往SSD寫入/讀取數據，半程帶保鏢的情況
+
+![img208](./image/img208.PNG)
+
+![img209](./image/img209.PNG)
+
+檢錯信息副作用：
+
+- 每個數據塊需要額外的至少8字節的數據保護信息，有效帶寬減少：數據塊越小，帶寬影響越大
+- SSD控制器需要做數據校驗，影響性能
+
+<h2 id="6.7">6.7 Namespace</h2>
+
+NVMe SSD主要由SSD控制器、閃存空間和PCIe接口組成
+
+如果把閃存空間劃分成若干個獨立的邏輯空間，每個空間邏輯塊地址（LBA）範圍是0到N-1（N是邏輯空間大小），這樣劃分出來的每一個邏輯空間我們就叫作NS
+
+- SATA SSD：一個閃存空間只對應著一個邏輯空間
+- NVMe SSD：一個閃存空間對應多個邏輯空間。
+
+每個NS都有一個名稱與ID，系統就是通過NS的ID來區分不同的NS。都有一個4KB大小的數據結構來描述它。該數據結構描述了該NS的大小，整個空間已經寫了多少，每個LBA的大小，端到端數據保護相關設置，以及該NS是屬於某個控制器還是幾個控制器可以共享等
+
+![img210](./image/img210.PNG)
+
+一個NVMe命令一共64字節，其中Byte[7：4]指定了要訪問的NS，如表6-5所示
+
+![img211](./image/img211.PNG)
+
+NS由主機創建和管理，每個創建好的NS，從主機操作系統角度看來，就是一個獨立的磁盤，用戶可在每個NS做分區等操作
+
+![img212](./image/img212.PNG)
+
+NS更多是應用在企業級，可以根據客戶不同需求創建不同特徵的NS，也就是在一個SSD上創建出若干個不同功能特徵的磁盤（NS）供不同客戶使用。
+
+NS的另外一個重要使用場合是：SR-IOV (Single Root-IO Virtualization)
+
+- 允許在虛擬機之間高效共享PCIe設備，並且它是在硬件中實現的，可以獲得能夠與本機性能媲美的IO性能
+- 單個IO資源（單個SSD）可由許多虛擬機共享
+
+一個NVMe子系統，除了可以有若干個NS，除了可以有若干個控制器，還可以有若干個PCIe接口
+
+![img213](./image/img213.PNG)
+
+![img214](./image/img214.PNG)
+
+多NS，多控制器，多PCIe接口，給NVMe SSD開發者以及存儲架構師帶來很大的發揮空間
+
+<h2 id="6.8">6.8 NVMe over Fabrics</h2>
+
+NVMe是針對新型的Non-Volatile Memory（比如閃存、3D XPoint等）而量身定制的
+
+NVMe SSD目前的主要應用之一是全閃存陣列，但是PCIe接口並不適合存儲設備的橫向擴展（Scale Out）：想像一下如何把幾百塊NVMe SSD通過PCIe接入一個存儲池中
+
+![img215](./image/img215.PNG)
 
 
 
