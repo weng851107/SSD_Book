@@ -96,7 +96,20 @@ If there is related infringement or violation of related regulations, please con
   - [6.6 NVMe中端到端的數據保護功能](#6.6)
   - [6.7 Namespace](#6.7)
   - [6.8 NVMe over Fabrics](#6.8)
-
+- [七、SSD測試](#7)
+  - [7.1 主流SSD測試軟件介紹](#7.1)
+    - [7.1.0 名詞介紹](#7.1.0)
+    - [7.1.1 FIO](#7.1.1)
+    - [7.1.2 AS SSD Benchmark](#7.1.2)
+    - [7.1.3 ATTO Disk Benchmark](#7.1.3)
+    - [7.1.4 CrystalDiskMark](#7.1.4)
+    - [7.1.5 PCMark Vantage](#7.1.5)
+    - [7.1.6 PCMark Vantage](#7.1.6)
+  - [7.2 驗證與確認](#7.2)
+  - [7.3 測試儀器](#7.3)
+    - [7.3.1 Emulator](#7.3.1)
+    - [7.3.2 協議分析儀](#7.3.2)
+    - [7.3.3 Jammer](#7.3.3)
 
 
 
@@ -2976,6 +2989,234 @@ NVMe是針對新型的Non-Volatile Memory（比如閃存、3D XPoint等）而量
 NVMe SSD目前的主要應用之一是全閃存陣列，但是PCIe接口並不適合存儲設備的橫向擴展（Scale Out）：想像一下如何把幾百塊NVMe SSD通過PCIe接入一個存儲池中
 
 ![img215](./image/img215.PNG)
+
+<h1 id="7">七、SSD測試</h1>
+
+<h2 id="7.1">7.1 主流SSD測試軟件介紹</h2>
+
+<h3 id="7.1.0">7.1.0 名詞介紹</h3>
+
+線程指的是同時有多少個讀或寫任務在並行執行
+
+- CPU裡面的一個核心同一時間只能運行一個線程
+- 一個核心，要想運行多線程，只能使用時間切片，每個線程跑一段時間片，所有線程輪流使用這個核心。
+- Linux使用Jiffies來代表一秒鐘被劃分成了多少個時間片，一般來說Jiffies是1000或100，所以時間片就是1毫秒或10毫秒。
+
+一般電腦發送一個讀寫命令到SSD只需要幾微秒，但是SSD要花幾百微秒甚至幾毫秒才能執行完這個命令。
+
+同步模式：
+
+- 如果發一個讀寫命令，然後線程一直休眠，等待結果回來才喚醒處理結果
+
+- 一般企業級SSD內部有8～16個數據通道，每個通道內部有4～16個並行邏輯單元（LUN，Plane），所以同時間可以執行32～256個讀寫命令。同步模式就意味著，只有其中一個並行單元在工作，很浪費SSD性能
+
+異步模式：
+
+- 大部分情況下SSD讀寫採用的是異步模式。就是用幾微秒發送命令，發完線程不會傻傻地在那裡等，而是繼續發後面的命令
+- 如果前面的命令執行完了，SSD通知會通過中斷或者輪詢等方式告訴CPU，由CPU來調用該命令的回調函數來處理結果
+- SSD裡面幾十上百個並行單元都能分到活干，效率暴增
+
+隊列深度：
+
+- 在異步模式下，CPU不能一直無限地發命令到SSD
+- 太多命令會很佔內存，會導致系統掛掉
+- 隊列深度64就是說，系統發的命令都發到一個大小為64的隊列，如果填滿了就不能再發
+
+Offset：
+
+- 測試讀寫的時候設置Offset就可以從某個偏移地址開始測試
+
+Linux讀寫SSD等塊設備使用的是BIO（Block-IO），這是個數據結構，包含了數據塊的邏輯地址LBA，數據大小和內存地址等
+
+<h3 id="7.1.1">7.1.1 FIO</h3>
+
+一般Linux系統是自帶FIO的
+
+https://github.com/axboe/fio 下載最新版本源代碼編譯安裝：`./configure;make && make install`
+
+`fio -rw=randwrite -ioengine=libaio -direct=1 –thread –numjobs=1 -iodepth=64 -
+filename=/dev/sdb4 -size=10G -name=job1 -offset=0MB -bs=4k -name=job2 -
+offset=10G -bs=512 --output TestResult.log`
+
+- -rw：讀寫模式
+  - 隨機寫測試randwrite
+  - 順序讀read
+  - 順序寫write
+  - 隨機讀randread
+  - 混合讀寫
+- -ioengine：異步或同步模式
+  - 異步模式libaio
+  - 同步模式sync
+- -direct=1：是否使用directIO
+- -thread/-fork：
+  - pthread_create創建線程
+  - fork創建進程
+- –numjobs=1：每個job是1個線程
+- -iodepth=64：隊列深度64
+- -filename=/dev/sdb4：數據寫到/dev/sdb4這個盤（塊設備）
+- -size=10G：每個線程寫入數據量是10GB
+- -name=job1：一個任務的名字，名字隨便起，重複也沒關係
+- -offset=0MB：從偏移地址0MB開始寫
+- -bs=4k：每一個BIO命令包含的數據大小是4KB。一般4kB IOPS測試，就是在這裡設置
+- --output TestResult.log：日誌輸出到TestResult.log
+
+用FIO做數據校驗：
+
+- 用-verify=str來選擇校驗算法，有md5、crc16、crc32、crc32c、crc32c-intel、crc64、crc7、sha256、sha512、sha1等
+- do_verify=1就意味著寫完再讀校驗，這種會很佔內存，因為FIO會把每個數據塊的校驗數據保存在內存裡
+- do_verify=0時只寫校驗數據，不做讀校驗
+
+FIO配置文件：可以用配置文件把這些參數寫進去，只需要 `fio test.log` 就能執行測試任務
+
+<h3 id="7.1.2">7.1.2 AS SSD Benchmark</h3>
+
+測試連續讀寫、4K對齊、4KB隨機讀寫和響應時間的表現，並給出一個綜合評分，有兩種模式可選，即MB/s與IOPS
+
+![img216](./image/img216.PNG)
+
+AS SSD Benchmark在測試時一共會生成和寫入5GB的測試數據文件，所有3個測試傳輸率項目都是去讀寫這些數據文件來換算速度的
+
+運行AS SSD基準測試至少需要2GB的空閒空間
+
+<h3 id="7.1.3">7.1.3 ATTO Disk Benchmark</h3>
+
+可以用來檢測硬盤、U盤、存儲卡及其他可移動磁盤的讀取及寫入速率
+
+件使用了不同大小的數據測試包，數據包按512B、1K、2K直到8K進行讀寫測試，測試完成後數據用柱狀圖的形式表達出來，體現文件大小比例不同對磁盤速度的影響
+
+ATTO默認測試全0數據
+
+![img217](./image/img217.PNG)
+
+<h3 id="7.1.4">7.1.4 CrystalDiskMark</h3>
+
+測試硬盤或者存儲設備的小巧工具，測試存儲設備大小和測試次數都可以選擇
+
+測試項目里分為，持續傳輸率測試（塊單1024KB），隨機512KB傳輸率測試，隨機4KB測試，隨機4KB QD32（隊列深度32）測試
+
+![img218](./image/img218.PNG)
+
+<h3 id="7.1.5">7.1.5 PCMark Vantage</h3>
+
+PCMark Vantage可以衡量各種類型PC的綜合性能
+
+測試內容可以分為以下三個部分：
+
+- 處理器測試
+- 圖形測試
+- 硬盤測試
+
+<h3 id="7.1.6">7.1.6 PCMark Vantage</h3>
+
+IOMeter是一個單機或者集群的I/O子系統測量和描述工具
+
+用戶可以按照測試需求去配置測試磁盤數據范圍、隊列深度、數據模式（可壓縮或者不可壓縮，有些版本支持，有些老版本不支持）、測試模式（隨機或者順序訪問）、讀寫測試比例、隨機和順序訪問比例，以及測試時間等。
+
+![img219](./image/img219.PNG)
+
+- 啟動程序，在Windows上單擊IOMeter圖標；
+- 在Disk Targets頁中選擇一個驅動器；
+- 在Access Specifications頁中選擇一個需要的測試項目；
+- 在Results Display頁中設置Update Frequency
+（Seconds），即設置多長時間統計一次測試結果，如果不設置，不但在測試期間不顯示測試結果，而且在測試結束後在測試結果文件中也沒有數據；
+  - Total I/Os per Second：數據存取速度，該值越大越好；
+  - Total MBs per Second：數據傳輸速度，該值越大越好；
+  - Average I/O Response Time：平均響應時間，該值越小越好；
+  - CPU Utilization：CPU佔用率，越低越好；
+- 單擊工具欄中的Start Tests按鈕，選擇一個測試結果輸出文件後開始一個測試（一般一次測試運行10分鐘即可）；
+- 測試完成後單擊“stop”按鈕停止所有測試；
+- 查看測試結果，由於IOMeter沒有提供一個GUI的查看測試報告的工具。可以使用Excel打開測試結果文件“csv”，然後利用Excel的圖標工具整理測試結果
+
+<h2 id="7.2">7.2 驗證與確認</h2>
+
+測試在英文裡則會對應N個詞：Simulation、Emulation、Verification、Validation、Test、QA。
+
+芯片設計的過程
+
+1. 需求：老大們商量這顆主控要實現什麼功能
+2. 架構：Architecture出設計圖
+3. 設計：ASIC把各種內部、外部IP攢起來
+4. 下線（Tape-out, Tapeout）一詞指的是積體電路（IC）或印刷電路板（PCB）設計的最後步驟，也就是送交製造
+5. 芯片回來
+
+設計階段：
+
+- 使用Emulator（以後介紹）或者FPGA進行測試的過程，叫Verification，為了幫助ASIC
+把事情做對
+- 通過升級Emulator的database或者更新FPGA的bit file把新的RTL(register-transfer level, 暫存器傳輸級)交給測試再驗證一遍，一直到做對為止
+
+在芯片回來階段：
+
+- 使用開發板進行測試的過程，叫Validation，確保ASIC把事情給做對
+- 相同的問題，如果是Validation階段才發現，則只能通過重新TapeOut（含mental fix）或者讓固件"打掩護"了
+
+<h2 id="7.3">7.3 測試儀器</h2>
+
+<h3 id="7.3.1">7.3.1 Emulator</h3>
+
+SSD主控芯片設計階段：
+
+- RTL Simulation
+- Emulator或者者FPGA
+
+Simulation和Emulation的區別：
+
+- Simulator是做仿真，基於軟件，重點是實現芯片的功能並輸出結果
+- Emulator是做模擬，用硬件實現，通過模擬實現芯片的內部設計，從而實現功能並輸出結果
+
+![img220](./image/img220.PNG)
+
+在設計SSD主控芯片時，Emulator和FPGA都可以用於ASIC Verification，那這兩者區別有哪些？
+
+- 價格：Emulator大概百萬美元級別，FPGA大概是數千到萬美元級別；
+- 能力：Emulator的邏輯可以到數十億門級別，FPGA大概是百萬門級別。一塊FPGA可能只能模擬前段（PCIe+NVMe），後端（閃存Controller）可能需要另外一塊FPGA
+- Debug：Emulator可以比較方便地導出ASIC工程師所需要的信號並抓取硬件邏輯波形，而FPGA在連接協議分析儀、邏輯分析儀方面比較方便；
+- 速度：Emulator雖然好，但是速度比FPGA要慢得多
+- 檔次：FPGA是個公司就能有，Emulator則絕對是實力的彰顯
+
+Emulator（或FPGA）的另一個好處是，固件團體可以使用這些工具提前開始開發，不用等芯片回來以後，先經歷"不死也要脫層皮"的Bringup階段，然後才開始"遇到問題不知道硬件原因還是代碼原因的"開發階段。
+
+<h3 id="7.3.2">7.3.2 協議分析儀</h3>
+
+前端協議分兩大類：SATA/SAS和PCIe
+
+SSD主控一般分前、中、後三段：
+
+- 前端就是SATA/SAS和PCIe這些配上AHCI或者NVMe
+- 中段就是FTL
+  - FTL是純軟件實現，測這個基本上不需要什麼設備
+- 後端就是閃存控制器
+  - 後端跟閃存打交道，主要用邏輯分析儀
+
+介紹兩種協議分析儀（Analyzer）：
+
+- SATA/SAS Analyzer
+  - SATA Host和SATA SSD之間傳輸命令和數據
+  - SerialTek SATA/SAS Analyzer
+
+    ![img221](./image/img221.PNG)
+
+  - 主機和SSD之間的示意圖
+
+    ![img222](./image/img222.PNG)
+
+  - SATA Trace示例
+
+    ![img223](./image/img223.PNG)
+
+
+- PCIe Analyzer
+
+  - 使用PCIe Analyzer可以測量PCIe的物理層、鏈路層、事務層。跟示波器不同，Analyzer可以基於PCIe協議將鏈路上所有Lane上發生的事務都解析出來，並且還提供Trigger（觸發）的功能
+
+    ![img224](./image/img224.PNG)
+
+    ![img225](./image/img225.PNG)
+
+對於Analyzer的一大挑戰就是在鏈路電源狀態切換的過程能夠快速適應，越早實現正確的抓包並解析越好
+
+<h3 id="7.3.3">7.3.3 Jammer</h3>
+
 
 
 
