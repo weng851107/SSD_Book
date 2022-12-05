@@ -110,7 +110,15 @@ If there is related infringement or violation of related regulations, please con
     - [7.3.1 Emulator](#7.3.1)
     - [7.3.2 協議分析儀](#7.3.2)
     - [7.3.3 Jammer](#7.3.3)
-
+  - [7.4 回歸測試](#7.4)
+  - [7.5 DevSlp測試](#7.5)
+  - [7.6 PCIe InterOP](#7.6)
+  - [7.7 WA(Write Amplification)測試](#7.7)
+  - [7.8 耐久度測試](#7.8)
+  - [7.9 認證Certification](#7.9)
+  - [7.10 SSD Performance測試](#7.10)
+- [八、SSD電源管理](#8)
+  - [8.1 SATA省電模式Partial和Slumber](#8.1)
 
 
 <h1 id="0">Pre-Knowledge</h1>
@@ -3217,6 +3225,204 @@ SSD主控一般分前、中、後三段：
 
 <h3 id="7.3.3">7.3.3 Jammer</h3>
 
+為了保證健壯性，ASIC和固件工程師們要花大量的精力，腦補各種錯誤可能性，在RTL和FW中加入相應的錯誤處理（Error Handling）的流程
 
+搞測試的就是平時給ASIC和固件找麻煩，以SATA SSD為例，可以用一種工具——Jammer
+
+![img226](./image/img226.PNG)
+
+Jammer還有別的用處，當你想知道某種場景（Scenario）發生以後主機或者設備的反應時，可以通過Jammer來知道答案
+
+<h2 id="7.4">7.4 回歸測試</h2>
+
+回歸測試（Regression Test）：
+
+- 確保新的代碼沒有影響原有功能
+- 從現有功能的測試用例中選取部分或者全部出來進行測試
+  - 那些經常失敗的項目，比如壓力測試；
+  - 用戶肉眼可見的功能，比如跑Benchmark；
+  - 核心功能的測試；
+  - 那些目前正在進行或者剛完成的功能；
+  - 數據完整性測試——R/W/C；
+  - 邊界值測試。
+
+<h2 id="7.5">7.5 DevSlp測試</h2>
+
+新的測試要求主要是關注DevSlp狀態的進出是否正常，要實現這個必須具備兩點：
+
+- 能讓設備進入DevSlp
+- 進去以後能夠偵測到DevSlp的狀態
+
+![img227](./image/img227.PNG)
+
+針對DevSlp的case：
+
+- IPM-12：Entering DevSlp Interface power state（進入DevSlp模式）
+
+  1. 先讓SSD進入DevSlp狀態
+  2. 保持DevSlp信號有效的情況下，持續向SSD發包，確保SSD不會回應發過去的包
+  3. 檢查各種時間參數是否在規定範圍內
+
+    ![img228](./image/img228.PNG)
+
+    ![img229](./image/img229.PNG)
+
+- IPM-13：DevSlp interface power state exit latency（DevSlp模式退出時延）
+  - 退出DevSlp並不需要完整的上電流程，而是使用COMWAKE信號讓SATA鏈路快速進入PHY Ready狀態
+  - DETO：協議規定設備從DevSlp狀態下退出需要在20ms內完成
+
+<h2 id="7.6">7.6 PCIe InterOP</h2>
+
+PCI-SIG會提供Compliance Workshop，各公司可以把自己的產品拿去測試，包括：
+
+- Electrical Testing：電氣化測試，重點測試物理層的發送端和接收端。
+- Configuration Testing：PCIe設備配置空間測試。
+- Link Protocol Testing：設備鏈路層協議相關測試。
+- Transaction Protocol Testing：事務層協議測試。
+- Platform BIOS Testing：平台BIOS測試。
+
+如果能走完這一套流程，說明PCIe接口基本上沒有問題，PCI-SIG會將其放置[Integrators List](https://pcisig.com/developers/integrators-list)
+
+Interoperability Test：各家公司可以把自家產品拿出來跟其他公司的產品放到一起，看互相之間組隊有沒有問題
+
+>PCIe SSD最高到Gen3x4（鏈路速度Gen3，帶寬為x4）
+某開發版 RC最高到Gen3x16
+
+- 通過Link Capability Register（鏈路能力寄存器）了解雙方各自的鏈路速度[3：0]和帶寬[9：4]，如圖7-21所示
+
+    ![img230](./image/img230.PNG)
+
+- 把PCIe SSD插到某公司的開發板，開機，檢查你的PCIe SSD被OS識別到（過程中可能會提示安裝驅動）
+
+- 檢查Link Status Register確定link狀態是Gen3x4，如圖7-22所示
+
+    ![img231](./image/img231.PNG)
+
+- 若PCIe SSD還支持其他lane width，重複上述步驟
+
+- Speed和Width正確還不夠，還需要做一下簡單的數據傳輸，確保數據能順利通過PCIe Bus，透過PCI-SIG提供的[PCITree](http://www.pcitree.de/)來查看PCIe Register
+
+以上都順利通過，把你們倆的交手記錄上傳到PCISIG的服務器上
+
+<h2 id="7.7">7.7 WA(Write Amplification)測試</h2>
+
+$$
+WA=閃存寫入的數據量/主機寫入的數據量
+$$
+
+閃存寫入的數據量 和 主機寫入的數據量 可以從SMART信息裡得知
+
+- S.M.A.R.T，全稱叫Self-Monitoring, Analysis, and Reporting Technology 自我監測，分析和報告技術
+
+![img232](./image/img232.PNG)
+
+<h2 id="7.8">7.8 耐久度測試</h2>
+
+JEDEC固態技術協會 有兩份SSD Endurance測試的協
+議：
+
+- JESD 218A：測試方法
+- JESD 219：workload
+
+基本測項：
+
+- TBW：总写入数据量。
+- FFR（Function Failure Requirement）：整个写入过程中产生
+的累计功能性错误。
+- Data Retention：长时间不使用（上电）情况下保持数据的能
+力。
+- UBER（Uncorrectable Bit Error Rate）：UBER=number of
+data errors/number of bits read
+
+企業級和消費級SSD在耐久度的要求上是不同的，體現在：
+
+- 工作時間
+- 工作溫度
+- UBER
+- Retention溫度以及時間
+
+![img233](./image/img233.PNG)
+
+<h2 id="7.9">7.9 認證Certification</h2>
+
+SATA-IO Plugfest和IW（Interoperability Workshop）
+
+- IW的對像是量產產品，由SATA-IO主導，有固定的測試流程和項目，並且測試結果需要提交SATA-IO，通過測試的設備可以加入Integrators List
+- Plugfest的對像是開發階段的產品，廠商之間互相玩耍，測什麼，怎麼測，大家自己說了算，測試結果不用提交給SATA-IO
+
+---
+
+PCIe SIG Compliance Program
+
+https://pcisig.com/developers/compliance-program
+
+- Electrical Testing：針對平台和卡的Tx和Rx電器性能進行測試
+- Configuration Testing：PCIe configuration space測試（Tool：PCIE CV）
+- Link Protocol Testing：針對設備進行鏈路層協議測試
+- Transaction Protocol Testing：針對設備進行傳輸層協議測試
+- Platform BIOS Testing：針對平台BIOS進行測試，判斷其能否識別並正確配置設備
+
+通過PCIe SIG的測試同樣可以加入Integrators List
+
+---
+
+UNH-IOL(University of New Hampshire
+InterOperability Laboratory) NVMe Test
+
+https://www.iol.unh.edu/testing/storage/nvme/testsuites
+
+- NVMe Conformance Test Suite
+- NVMe Interoperability Test Suite
+
+NVMe的測試工具：
+
+https://www.iol.unh.edu/solutions/testtools/interact
+
+- IOL INTREACT PC EDITION Software：基於UNH-IOL自己的NVMe Conformance Test Suite開源項目的工具，圖形界面上手容易
+- IOL INTERACT Teledyne-LeCroy EDITION Software：高級版本，必須配合LeCroy的PCIe Exerciser和Analyzer使用，能夠自動跑完NVMe Conformance Test Suite裡面要求的測試，而且能夠自動抓取trace以供分析。
+
+<h2 id="7.10">7.10 SSD Performance測試</h2>
+
+全球網絡存儲工業協會（英語：Storage Networking Industry Association，縮寫：SNIA）給Client SSD與Enterprise SSD都制定了PerformanceTest（性能測試）的規範
+
+https://www.snia.org/
+
+名詞認知：
+
+- FOB：Fresh Out of Box，指的是剛開封、全新的盤，並不是這塊盤在未來正常使用過程中的真實能力
+- Transition：經過一段時間的讀寫，趨向於穩定狀態，這個過程稱為轉換狀態
+- Steady State：數值穩定在一個區間，Performance相關的數據，例如Throughput（吞吐量）、IOPS、Latency（延遲）都必須在Steady State下獲取
+
+    ![img234](./image/img234.PNG)
+
+Steady State（穩定態）的判斷原則是：這段時間內性能波動不超過±10%
+
+概念介紹：
+
+- Purge（擦除）：每次進行Performance測試前都必須進行，消除測試前的其他操作（讀寫及其他測試）帶來的影響，從而保證每次測試時盤都是從一個已知的、相同的狀態下開始，可以理解為：讓盤回到FOB狀態
+
+- Precondition：通過對盤進行IO使其逐步進入Steady State的過程，分兩步進行
+
+  - Workload Independent Preconditioning（WIPC）：第一步，讀寫時不使用測試的Workload
+  - Workload Dependent Preconditioning（WDPC）：第二步，讀寫時使用測試的Workload
+
+- Active Range：測試過程中對盤上LBA發送IO命令的範圍，如所示
+
+    ![img235](./image/img235.PNG)
+
+- Data pattern：Performance測試必須使用隨機數據（向閃存中寫入的數據
+
+<h1 id="8">八、SSD電源管理</h1>
+
+SSD（Solid State Drive），即固態硬盤，是一種以半導體閃存（NAND Flash）作為介質的存儲設備
+
+<h2 id="8.1">8.1 SATA省電模式Partial和Slumber</h2>
+
+SATA鏈路電源管理，可以讓SATA鏈路的PHY進入低功耗模式，與硬盤或者SSD其他部分（CPU、DDR、後端）的電源管理是完全獨立的
+
+- Partial模式：PHY處於低功耗狀態，退出時間要求＜10μs。 Partial是讓部分物理層（PHY）電路進入休眠模式，能夠在10μs內被喚醒
+- Slumber模式：PHY處於更低功耗狀態，退出時間要求＜10ms。與Partial模式相比，Slumber關閉更多的電路，因此它的恢復要慢一些，恢復時間大約為10ms
+
+    ![img236](./image/img236.PNG)
 
 
